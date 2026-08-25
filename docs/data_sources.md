@@ -2,27 +2,53 @@
 
 This project does not scrape Indian Kanoon directly: they have no free bulk
 API, and automated bulk scraping at the target scale is slow, ToS-questionable,
-and easy to get IP-blocked partway through. Instead, judgments are sourced from
-two open datasets that were themselves built by academically scraping Indian
-Kanoon, unioned for scale and diversity:
+and easy to get IP-blocked partway through. Instead, judgments are sourced
+from an open dataset built by academically scraping official court records.
 
-| Dataset | Size | License | Role |
-|---|---|---|---|
-| [`opennyaiorg/InJudgements_dataset`](https://huggingface.co/datasets/opennyaiorg/InJudgements_dataset) | ~13K judgments, 1950–2017, 24 courts, 8 case types | Apache-2.0 | Week 1 sample; richer per-judgment metadata (court, case type, IndianKanoon source URL). |
-| [`Exploration-Lab/IL-TUR`](https://huggingface.co/datasets/Exploration-Lab/IL-TUR) (`CJPE` config) | ~34K Supreme Court judgments | CC-BY-NC-SA-4.0 | Week 2–3 scale-up. Built from the ILDC corpus ([Malik et al., ACL 2021](https://aclanthology.org/2021.acl-long.313/)); text-only, no structured court/date/party fields. |
+## Current source (default, no auth required)
 
-After light dedup, the union is **~47–48K judgments** — reported honestly in
-the README as "~48K", not padded to a literal 50,000.
+[`sinhal/Indian_Supreme_Court_Judgments`](https://huggingface.co/datasets/sinhal/Indian_Supreme_Court_Judgments)
+— **~41.8K real Supreme Court of India judgments**, OpenRAIL license, sourced
+from [JUDIS.NIC.IN](http://judis.nic.in), the Supreme Court's own official
+judgment repository (an even more authoritative primary source than Indian
+Kanoon, which itself draws from JUDIS). No HuggingFace account or token
+required — `scripts/download_datasets.py` pulls it directly.
 
-**License note:** IL-TUR is CC-BY-NC-SA-4.0 (non-commercial). This is fine for
-a free portfolio tool but blocks any future monetization of that slice of the
-corpus without renegotiating with the dataset authors. Every `judgments` row
-stores `source_dataset` and `source_url` for provenance.
+Per-judgment structured fields: `pet`/`res` (petitioner/respondent, ~97%
+populated), `bench` (judges, ~74% populated, comma-separated — parsed into an
+array), `judgment_dates` (~100% populated, normalized from source `DD-MM-YYYY`
+to ISO at download time), `case_no` (used to derive a rough `case_type`), and
+`full_text` (the judgment itself). `court` is a constant, "Supreme Court of
+India" — this source is single-court, not multi-court. Fields genuinely
+absent in the source (not present ~3–26% of the time depending on the field)
+are stored as SQL `NULL` rather than guessed at.
+
+The raw text retains original OCR/scrape artifacts from the source pipeline
+(e.g. "company" substituted for "com", "number" for "no" — a known corruption
+pattern in some older Indian court OCR runs). Left as-is: silently
+"correcting" judgment text is worse than a visible, honest artifact.
+
+## Datasets considered during planning, not used
+
+Two multi-court datasets were originally identified for their court/case-type
+diversity — `opennyaiorg/InJudgements_dataset` (Apache-2.0, ~13K judgments,
+24 courts) and `Exploration-Lab/IL-TUR`'s `CJPE` config (CC-BY-NC-SA-4.0,
+~34K SC judgments, text-only). At ingestion-build time both turned out to be
+**gated HuggingFace repos** requiring an authenticated, access-approved
+account — not surfaced by a plain dataset-card read during planning, only by
+actually attempting a download. `scripts/download_datasets.py` keeps both
+download functions (`download_injudgements`, `download_il_tur`) for anyone
+who runs `huggingface-cli login` with an approved account and wants that
+court diversity; they are not the default path.
 
 ## Scale
 
-Full-corpus ingestion (chunking + embedding all ~48K judgments, ~150–250K
-chunks) runs as an unattended offline batch job via
-`app.ingestion.ingest_cli`, taking an estimated 1.5–3 hours of CPU embedding
-time. It is not a Week 1 deliverable — Week 1 proves the same code path
-end-to-end on a ~500–1,000 judgment sample.
+`sinhal/Indian_Supreme_Court_Judgments` alone is ~41.8K judgments — close to
+the original "~50K" target on its own, though single-court rather than
+multi-court. `scripts/download_datasets.py --max-rows N` caps the download for
+a fast local sample (e.g. `--max-rows 500` for a Week 1 proof-of-pipeline
+run); the full corpus is the Week 2–3 scale-up target, ingested as an
+unattended offline batch job via `scripts/ingest_judgments.py` or
+`app.ingestion.ingest_cli` — the same idempotent code path either way, only
+`--limit`/`--max-rows` differ. Every `judgments` row stores `source_dataset`
+and `source_url` (a JUDIS.NIC.IN-relative path) for provenance.

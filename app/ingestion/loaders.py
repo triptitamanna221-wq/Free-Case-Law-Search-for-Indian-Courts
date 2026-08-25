@@ -1,8 +1,10 @@
 import logging
-from collections.abc import Iterable
+from collections.abc import Generator, Iterable
 from dataclasses import dataclass
 from datetime import date
+from pathlib import Path
 
+import pyarrow.parquet as pq
 from sqlalchemy import select, text, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
@@ -24,6 +26,51 @@ class RawJudgment:
     court: str | None = None
     case_type: str | None = None
     decision_date: str | None = None
+    judges: list[str] | None = None
+    petitioner: str | None = None
+    respondent: str | None = None
+
+
+def iter_staged_judgments(
+    source: Path, limit: int | None = None
+) -> Generator[RawJudgment, None, None]:
+    """Stream RawJudgment rows from staged parquet, in batches, so a 50K-row
+    corpus is never fully materialized in memory. `source` is either a single
+    parquet file or a directory of them (read in sorted filename order for
+    deterministic --limit behavior across runs).
+
+    A row missing raw_text is skipped with a warning rather than raised --
+    one malformed row from an upstream dataset shouldn't abort the whole load.
+    """
+    parquet_files = [source] if source.is_file() else sorted(source.glob("*.parquet"))
+    yielded = 0
+    for parquet_file in parquet_files:
+        table = pq.read_table(parquet_file)
+        for batch in table.to_batches(max_chunksize=500):
+            for row in batch.to_pylist():
+                if limit is not None and yielded >= limit:
+                    return
+                if not row.get("raw_text") or not row.get("raw_text").strip():
+                    logger.warning(
+                        "Skipping malformed row (empty raw_text): source=%s external_id=%s",
+                        parquet_file.name,
+                        row.get("external_id"),
+                    )
+                    continue
+                yield RawJudgment(
+                    source_dataset=row["source_dataset"],
+                    external_id=str(row["external_id"]),
+                    title=row["title"],
+                    raw_text=row["raw_text"],
+                    source_url=row.get("source_url"),
+                    court=row.get("court"),
+                    case_type=row.get("case_type"),
+                    decision_date=row.get("decision_date"),
+                    judges=row.get("judges") or None,
+                    petitioner=row.get("petitioner"),
+                    respondent=row.get("respondent"),
+                )
+                yielded += 1
 
 
 def _parse_decision_date(raw: str | None) -> date | None:
@@ -39,11 +86,18 @@ def _parse_decision_date(raw: str | None) -> date | None:
         return None
 
 
-def upsert_judgments(db: Session, rows: Iterable[RawJudgment]) -> int:
+def upsert_judgments(db: Session, rows: Iterable[RawJudgment]) -> dict[tuple[str, str], int]:
     """Idempotent batch upsert keyed on (source_dataset, external_id). Safe to
     re-run after a crash: rows already present are updated in place, not duplicated.
+
+    Returns {(source_dataset, external_id): judgment_id} for every row in this
+    batch, so callers can immediately chunk/embed the just-written judgments
+    without a re-query. Keyed on the pair, not external_id alone, since that's
+    the actual DB unique constraint -- a batch could in principle span two
+    source datasets whose external_ids collide.
+    Does not commit -- caller controls the transaction boundary.
     """
-    count = 0
+    ids: dict[tuple[str, str], int] = {}
     for row in rows:
         stmt = (
             insert(Judgment)
@@ -56,16 +110,19 @@ def upsert_judgments(db: Session, rows: Iterable[RawJudgment]) -> int:
                 court=row.court,
                 case_type=row.case_type,
                 decision_date=_parse_decision_date(row.decision_date),
+                judges=row.judges,
+                petitioner=row.petitioner,
+                respondent=row.respondent,
             )
             .on_conflict_do_update(
                 index_elements=["source_dataset", "external_id"],
                 set_={"title": row.title, "raw_text": row.raw_text},
             )
+            .returning(Judgment.id)
         )
-        db.execute(stmt)
-        count += 1
-    db.commit()
-    return count
+        judgment_id = db.execute(stmt).scalar_one()
+        ids[(row.source_dataset, row.external_id)] = judgment_id
+    return ids
 
 
 def chunk_pending_judgments(db: Session, batch_size: int = 200) -> int:

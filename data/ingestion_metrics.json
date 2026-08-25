@@ -1,0 +1,37 @@
+{
+  "started_at": "2026-08-25T22:36:04.311729+00:00",
+  "embedding_model": "all-MiniLM-L6-v2",
+  "embedding_dim": 384,
+  "dry_run": true,
+  "chunk_size_tokens": 512,
+  "chunk_overlap_tokens": 256,
+  "judgments_processed": 0,
+  "chunks_embedded": 6314,
+  "total_tokens": 3035073,
+  "skipped_malformed": 0,
+  "failed_batches": 0,
+  "total_runtime_s": 113.56,
+  "peak_memory_mb": 493.1,
+  "memory_after_cleanup_mb": 301.8,
+  "embedding_latency_ms_per_chunk": {
+    "count": 15,
+    "mean_ms": 13.79,
+    "p50_ms": 12.221,
+    "p95_ms": 18.955,
+    "max_ms": 23.036
+  },
+  "db_insert_latency_ms_per_batch": {
+    "count": 0,
+    "mean_ms": null,
+    "p50_ms": null,
+    "p95_ms": null,
+    "max_ms": null
+  },
+  "db_insert_latency_ms_per_record": {
+    "count": 0,
+    "mean_ms": null,
+    "p50_ms": null,
+    "p95_ms": null,
+    "max_ms": null
+  }
+}

@@ -47,3 +47,28 @@ def test_sentence_longer_than_chunk_size_is_kept_intact():
     chunks = chunk_text(long_sentence, chunk_size=10, overlap=2)
 
     assert chunks == [long_sentence]
+
+
+def test_custom_token_counter_is_used_instead_of_whitespace_approximation():
+    # a counter that returns 0 for everything means nothing ever exceeds
+    # chunk_size, proving the injected counter -- not the default -- decides
+    # chunk boundaries.
+    sentences = [f"sentence{i} alpha beta gamma end." for i in range(10)]
+    text = " ".join(sentences)
+
+    chunks = chunk_text(text, chunk_size=1, overlap=0, token_counter=lambda s: 0)
+
+    assert len(chunks) == 1
+    assert chunks[0] == text
+
+
+def test_token_counter_receives_individual_sentences_not_whole_text():
+    seen: list[str] = []
+
+    def counting_counter(s: str) -> int:
+        seen.append(s)
+        return len(s.split())
+
+    chunk_text("First sentence. Second sentence.", chunk_size=50, overlap=0, token_counter=counting_counter)
+
+    assert seen == ["First sentence.", "Second sentence."]

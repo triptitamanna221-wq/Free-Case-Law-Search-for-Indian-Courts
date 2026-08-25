@@ -30,7 +30,9 @@ actually needs.
 
 | Metric | Value |
 |---|---|
-| Judgments indexed | _TBD after Week 1 ingest run_ |
+| Judgments indexed | _TBD — pending a full DB-backed ingest run (see `data/ingestion_metrics.json`)_ |
+| Embedding latency (p50 / p95, ms/chunk) | **12.2 / 19.0** — real, from a 300-judgment dry run (`data/ingestion_metrics.json`) |
+| DB insert latency (p50 / p95, ms/record) | _TBD — requires a live Postgres, not available in the environment that built this pipeline_ |
 | Search p50 / p95 latency | _TBD, measured locally against the seeded sample_ |
 | Test coverage | _TBD, `uv run pytest --cov`_ |
 | Uptime | _TBD once deployed_ |
@@ -42,6 +44,7 @@ measured, not estimated.)
 
 Full schema + index rationale: [`docs/erd.md`](docs/erd.md).
 Data provenance + licensing: [`docs/data_sources.md`](docs/data_sources.md).
+Ingestion pipeline details: [`docs/data_pipeline.md`](docs/data_pipeline.md).
 
 ```mermaid
 flowchart LR
@@ -77,10 +80,12 @@ flowchart LR
   *final* row count and gives poor recall if built before the table is
   populated — a bad fit for a resumable, incrementally-growing ingest. HNSW
   builds incrementally with better recall/latency at this scale.
-- **Two open HF datasets, not scraping Indian Kanoon directly.** See
-  [`docs/data_sources.md`](docs/data_sources.md) for the full reasoning —
-  short version: no free bulk API, ToS-questionable at 50K-document scale,
-  and a bare scraper loop isn't itself something worth shipping.
+- **An open HF dataset, not scraping Indian Kanoon directly.** See
+  [`docs/data_sources.md`](docs/data_sources.md) for the full reasoning and
+  history (including a pivot away from two originally-planned datasets that
+  turned out to require HuggingFace auth) — short version: no free bulk API,
+  ToS-questionable at 50K-document scale, and a bare scraper loop isn't
+  itself something worth shipping.
 - **Render (app) + Supabase (Postgres), not Fly.io or Render's own free
   Postgres.** Render's free Postgres now expires (deletes) after 30 days.
   Fly.io dropped its free tier for new accounts. Supabase's free Postgres
@@ -104,8 +109,8 @@ uv sync
 uv run alembic upgrade head
 
 # 3. pull a sample of judgments and run the ingestion pipeline
-uv run python scripts/download_datasets.py --dataset injudgements
-uv run python -m app.ingestion.ingest_cli --limit 500
+uv run python scripts/download_datasets.py --max-rows 500
+uv run python scripts/ingest_judgments.py --source data/staging --limit 500
 
 # 4. try it
 curl -X POST localhost:8000/search \
@@ -116,8 +121,9 @@ curl -X POST localhost:8000/search \
 ## Testing
 
 ```bash
-uv run pytest tests/unit          # ~25 tests, no DB/network required
+uv run pytest tests/unit          # 36 tests, no DB/network required
 uv run pytest tests/integration   # spins up a real pgvector/pgvector:pg15 container
+uv run pytest -m integration -v   # just the DB-marked subset, same tests/integration/ tree
 ```
 
 CI (`.github/workflows/ci.yml`) runs lint → unit tests → integration tests →
@@ -131,7 +137,7 @@ Docker build on every push.
 - [x] Docker + docker-compose (app, db)
 - [x] CI: lint → test → build
 - [ ] Week 1: ~500–1,000 judgments ingested end-to-end, CI green on a pushed branch
-- [ ] Week 2–3: full ~48K-judgment corpus ingested as an offline batch job
+- [ ] Week 2–3: full ~41.8K-judgment corpus ingested as an offline batch job
 - [ ] Deployed to Render + Supabase with a live URL
 - [ ] Week 2 polish: frontend
 - [ ] Later: auth (schema already has a `users` table for it)

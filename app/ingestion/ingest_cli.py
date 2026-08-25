@@ -10,13 +10,11 @@ import argparse
 import logging
 from pathlib import Path
 
-import pyarrow.parquet as pq
-
 from app.db.session import SessionLocal
 from app.ingestion.loaders import (
-    RawJudgment,
     chunk_pending_judgments,
     embed_pending_chunks,
+    iter_staged_judgments,
     upsert_judgments,
 )
 
@@ -25,33 +23,13 @@ logger = logging.getLogger(__name__)
 DEFAULT_STAGING_DIR = Path("data/staging")
 
 
-def _iter_staged_rows(staging_dir: Path, limit: int | None):
-    yielded = 0
-    for parquet_file in sorted(staging_dir.glob("*.parquet")):
-        table = pq.read_table(parquet_file)
-        for batch in table.to_batches(max_chunksize=500):
-            for row in batch.to_pylist():
-                if limit is not None and yielded >= limit:
-                    return
-                yield RawJudgment(
-                    source_dataset=row["source_dataset"],
-                    external_id=str(row["external_id"]),
-                    title=row["title"],
-                    raw_text=row["raw_text"],
-                    source_url=row.get("source_url"),
-                    court=row.get("court"),
-                    case_type=row.get("case_type"),
-                    decision_date=row.get("decision_date"),
-                )
-                yielded += 1
-
-
 def run_load(staging_dir: Path, limit: int | None) -> None:
     db = SessionLocal()
     try:
-        rows = list(_iter_staged_rows(staging_dir, limit))
-        count = upsert_judgments(db, rows)
-        logger.info("Upserted %d judgments from %s", count, staging_dir)
+        rows = list(iter_staged_judgments(staging_dir, limit))
+        upserted = upsert_judgments(db, rows)
+        db.commit()
+        logger.info("Upserted %d judgments from %s", len(upserted), staging_dir)
     finally:
         db.close()
 

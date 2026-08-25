@@ -1,5 +1,9 @@
+import pytest
+
 from app.db.models import Chunk, Judgment
 from app.ingestion.embedder import embed_texts
+
+pytestmark = pytest.mark.integration
 
 KEYWORD_CHUNK_TEXT = (
     "The right to privacy is a fundamental right protected under Article 21 "
