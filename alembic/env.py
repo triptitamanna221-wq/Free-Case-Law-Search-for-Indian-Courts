@@ -8,7 +8,13 @@ from app.db.models import Chunk, Citation, Judgment, SavedSearch, User  # noqa: 
 from app.db.session import Base
 
 config = context.config
-config.set_main_option("sqlalchemy.url", get_settings().database_url)
+# Only fall back to app settings if the caller hasn't already pinned a URL
+# (tests/integration/conftest.py sets one explicitly before invoking Alembic,
+# to point at its own migrated database rather than app.config's — which, by
+# the time this runs, may have cached a stale DATABASE_URL from whatever
+# imported app.db.session first during test collection).
+if not config.get_main_option("sqlalchemy.url"):
+    config.set_main_option("sqlalchemy.url", get_settings().database_url)
 
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)

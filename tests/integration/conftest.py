@@ -34,8 +34,12 @@ def postgres_url():
 
 @pytest.fixture(scope="session")
 def _migrated_engine(postgres_url):
-    os.environ["DATABASE_URL"] = postgres_url
-
+    # set_main_option below is what actually steers Alembic — app.config's
+    # get_settings() is @lru_cache'd and may already be cached (with the wrong,
+    # non-test DATABASE_URL) by the time this fixture runs, since anything that
+    # imports app.db.session during pytest's collection phase triggers it early.
+    # alembic/env.py is written to respect an explicitly pre-set sqlalchemy.url
+    # instead of overwriting it from settings, so this works regardless.
     alembic_cfg = Config(os.path.join(REPO_ROOT, "alembic.ini"))
     alembic_cfg.set_main_option("sqlalchemy.url", postgres_url)
     alembic_cfg.set_main_option("script_location", os.path.join(REPO_ROOT, "alembic"))
