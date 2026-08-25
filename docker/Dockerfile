@@ -16,6 +16,7 @@ COPY hybrid_search ./hybrid_search
 COPY alembic ./alembic
 COPY alembic.ini ./
 COPY scripts ./scripts
+COPY README.md ./
 
 RUN uv sync --frozen --no-dev
 
