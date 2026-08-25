@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING
 from sqlalchemy import (
     ARRAY,
     CheckConstraint,
+    Computed,
     Date,
     DateTime,
     ForeignKey,
@@ -37,9 +38,14 @@ class Judgment(Base):
     petitioner: Mapped[str | None] = mapped_column(Text, nullable=True)
     respondent: Mapped[str | None] = mapped_column(Text, nullable=True)
     raw_text: Mapped[str] = mapped_column(Text, nullable=False)
-    # populated by a GENERATED ALWAYS AS ... STORED column (see alembic/versions/0001);
-    # mapped read-only here since SQLAlchemy never writes to it directly.
-    text_tsv: Mapped[str | None] = mapped_column(TSVECTOR, nullable=True, deferred=True)
+    # GENERATED ALWAYS AS ... STORED at the DB level (see alembic/versions/0001).
+    # Computed() here isn't DDL authority (Alembic already created the real
+    # column) -- it exists purely so the ORM excludes text_tsv from INSERT/UPDATE
+    # statements, matching Postgres' refusal to accept an explicit value for it.
+    text_tsv: Mapped[str | None] = mapped_column(
+        TSVECTOR, Computed("to_tsvector('english', coalesce(title, '') || ' ' || raw_text)"),
+        nullable=True, deferred=True,
+    )
     language: Mapped[str] = mapped_column(String, nullable=False, default="en")
     ingestion_status: Mapped[str] = mapped_column(String, nullable=False, default="pending")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

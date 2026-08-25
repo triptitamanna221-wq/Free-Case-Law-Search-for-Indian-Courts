@@ -18,7 +18,7 @@ _BM25_QUERY = text(
     FROM chunks c
     JOIN judgments j ON j.id = c.judgment_id
     WHERE c.text_tsv @@ plainto_tsquery('english', :query)
-      AND (:court IS NULL OR j.court = :court)
+      AND (:court::text IS NULL OR j.court = :court::text)
     ORDER BY rank DESC
     LIMIT :candidate_count
     """
@@ -30,7 +30,7 @@ _VECTOR_QUERY = text(
     FROM chunks c
     JOIN judgments j ON j.id = c.judgment_id
     WHERE c.embedding IS NOT NULL
-      AND (:court IS NULL OR j.court = :court)
+      AND (:court::text IS NULL OR j.court = :court::text)
     ORDER BY c.embedding <=> (:embedding)::vector ASC
     LIMIT :candidate_count
     """
