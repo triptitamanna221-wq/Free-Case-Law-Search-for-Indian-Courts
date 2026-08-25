@@ -82,6 +82,23 @@ jobs:
           conn.execute("CREATE EXTENSION IF NOT EXISTS vector")
           print("pgvector extension ready")
           PY
+      - name: Create test database
+        run: |
+          uv run python - <<'PY'
+          import os
+          import psycopg
+
+          # Connect to the default 'postgres' database to create case_law_test
+          conn_url = "postgresql://postgres:postgres@localhost:5432/postgres"
+          conn = psycopg.connect(conn_url)
+          conn.autocommit = True
+          try:
+              conn.execute("CREATE DATABASE case_law_test")
+              print("Database case_law_test created")
+          except psycopg.errors.DuplicateDatabase:
+              print("Database case_law_test already exists")
+          conn.close()
+          PY
       - name: Integration tests
         # Alembic (invoked from tests/integration/conftest.py) also runs
         # `CREATE EXTENSION IF NOT EXISTS vector` as part of migration 0001 —
