@@ -18,6 +18,36 @@ jobs:
   test:
     runs-on: ubuntu-latest
     needs: lint
+    services:
+      postgres:
+        # postgres:15-alpine has no pgvector build, and compiling pgvector from
+        # source against an Alpine-based server inside a bare `services:`
+        # container isn't a reliable CI step (no exec access before the
+        # container is health-checked, musl vs glibc build quirks). This image
+        # *is* postgres:15 with pgvector already compiled in — same Postgres
+        # 15+ server, extension available the moment the container is healthy.
+        image: pgvector/pgvector:pg15
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: case_law_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      # tests/integration/conftest.py connects here directly instead of
+      # spinning up its own testcontainers instance. GitHub Actions blocks the
+      # job's steps from starting until the service above reports healthy, so
+      # by the time any step runs, Postgres is already accepting connections.
+      # SQLAlchemy needs the "+psycopg" driver suffix to pick psycopg3 (no
+      # psycopg2 is installed); raw psycopg.connect() calls below use the
+      # plain scheme instead, since psycopg doesn't understand "+psycopg".
+      SQLALCHEMY_TEST_DATABASE_URL: postgresql+psycopg://postgres:postgres@localhost:5432/case_law_test
+      PSYCOPG_TEST_DSN: postgresql://postgres:postgres@localhost:5432/case_law_test
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v3
@@ -31,10 +61,32 @@ jobs:
           key: hf-all-MiniLM-L6-v2
       - name: Unit tests
         run: uv run pytest tests/unit -v --cov --cov-report=term-missing
+      - name: Wait for Postgres
+        # Belt-and-suspenders: the service's own --health-cmd already blocks
+        # step start-up until `pg_isready` succeeds, but this makes the wait
+        # explicit and gives a clear log line if that ever isn't enough.
+        run: |
+          for i in $(seq 1 30); do
+            uv run python -c "import os, psycopg; psycopg.connect(os.environ['PSYCOPG_TEST_DSN'])" && break
+            echo "Postgres not ready yet, retrying ($i/30)..."
+            sleep 2
+          done
+      - name: Install pgvector extension
+        run: |
+          uv run python - <<'PY'
+          import os
+          import psycopg
+
+          conn = psycopg.connect(os.environ["PSYCOPG_TEST_DSN"])
+          conn.autocommit = True
+          conn.execute("CREATE EXTENSION IF NOT EXISTS vector")
+          print("pgvector extension ready")
+          PY
       - name: Integration tests
-        # tests/integration/conftest.py provisions its own pgvector/pgvector:pg15
-        # container via testcontainers and runs Alembic against it — the runner's
-        # own Docker daemon is enough, no separate services: block needed.
+        # Alembic (invoked from tests/integration/conftest.py) also runs
+        # `CREATE EXTENSION IF NOT EXISTS vector` as part of migration 0001 —
+        # the explicit step above just makes that precondition visible in the
+        # CI log rather than implicit inside the test run.
         run: uv run pytest tests/integration -v
 
   build:

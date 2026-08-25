@@ -5,15 +5,29 @@ from alembic.config import Config
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
-from testcontainers.postgres import PostgresContainer
 
 from alembic import command
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+# CI provisions its own Postgres+pgvector via a `services:` block and passes its
+# URL here (see .github/workflows/ci.yml) — the runner's health check already
+# guarantees it's reachable before this test session starts, so we connect
+# directly rather than spinning up a second container. Locally, where no CI
+# service exists, we fall back to testcontainers so `uv run pytest
+# tests/integration` still works standalone.
+TEST_DATABASE_URL_ENV = "SQLALCHEMY_TEST_DATABASE_URL"
+
 
 @pytest.fixture(scope="session")
 def postgres_url():
+    external_url = os.environ.get(TEST_DATABASE_URL_ENV)
+    if external_url:
+        yield external_url
+        return
+
+    from testcontainers.postgres import PostgresContainer
+
     with PostgresContainer("pgvector/pgvector:pg15", driver="psycopg") as container:
         yield container.get_connection_url()
 
