@@ -385,9 +385,17 @@ def main(argv: list[str] | None = None) -> None:
             "--source-type local (the default) against its output."
         )
 
+    if not args.source.exists():
+        raise FileNotFoundError(
+            f"--source {args.source} does not exist. This CLI reads staged parquet written by "
+            "`uv run python scripts/download_datasets.py` -- run that first, then point --source "
+            "at its output (default: data/staging). '--source hf' or similar shorthand isn't "
+            "supported: there's no single step that both downloads and ingests."
+        )
+
     logger.info("Loading embedding model: %s", args.embedding_model)
     model = SentenceTransformer(args.embedding_model)
-    embedding_dim = model.get_sentence_embedding_dimension()
+    embedding_dim = model.get_embedding_dimension()
     logger.info("Model loaded. Embedding dimension: %d", embedding_dim)
 
     metrics = IngestionMetrics(
@@ -399,6 +407,12 @@ def main(argv: list[str] | None = None) -> None:
     )
 
     rows = list(iter_staged_judgments(args.source, args.limit))
+    if not rows:
+        raise RuntimeError(
+            f"--source {args.source} exists but yielded 0 usable judgments. Check it actually "
+            "contains .parquet file(s) with a non-empty raw_text column -- refusing to write a "
+            "misleadingly 'successful' all-zero metrics file."
+        )
     logger.info("Loaded %d staged judgments from %s", len(rows), args.source)
 
     db = None if args.dry_run else SessionLocal()
