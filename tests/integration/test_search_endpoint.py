@@ -67,6 +67,30 @@ def test_search_returns_both_keyword_and_semantic_matches(client, db_session):
     assert keyword_result["matched_keyword"] is True
 
 
+def test_search_keyword_mode_excludes_semantic_only_match(client, db_session):
+    keyword_judgment_id, _ = _seed_judgment(
+        db_session, "Privacy Rights Case", KEYWORD_CHUNK_TEXT, KEYWORD_CHUNK_TEXT
+    )
+    semantic_judgment_id, _ = _seed_judgment(
+        db_session, "Personal Autonomy Case", SEMANTIC_CHUNK_TEXT, SEMANTIC_CHUNK_TEXT
+    )
+
+    response = client.post(
+        "/search",
+        json={"query": "privacy fundamental right", "search_mode": "keyword", "limit": 10},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    result_judgment_ids = {r["judgment_id"] for r in body["results"]}
+
+    # BM25's WHERE clause is a real filter -- the semantic-only judgment never
+    # matches the literal query terms, so keyword mode must exclude it.
+    assert keyword_judgment_id in result_judgment_ids
+    assert semantic_judgment_id not in result_judgment_ids
+    assert all(r["matched_semantic"] is False for r in body["results"])
+
+
 def test_search_with_no_matches_returns_empty_results(client, db_session):
     response = client.post("/search", json={"query": "zzz nonexistent legal doctrine qqq"})
 

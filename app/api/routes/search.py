@@ -61,27 +61,37 @@ def search(
 ) -> SearchResponse:
     started = time.perf_counter()
 
-    [query_embedding] = embed_texts([request.query])
+    # search_mode narrows to one retrieval path by simply not running the other
+    # query -- reciprocal_rank_fusion already handles an empty input list
+    # correctly (falls back to pure single-path ordering, see hybrid_search's
+    # own unit tests), so no special-casing is needed in the fusion step.
+    run_keyword = request.search_mode in ("hybrid", "keyword")
+    run_semantic = request.search_mode in ("hybrid", "semantic")
 
-    bm25_rows = db.execute(
-        _BM25_QUERY,
-        {
-            "query": request.query,
-            "court": request.court,
-            "candidate_count": settings.bm25_candidate_count,
-        },
-    ).all()
-    vector_rows = db.execute(
-        _VECTOR_QUERY,
-        {
-            "embedding": _to_pgvector_literal(query_embedding),
-            "court": request.court,
-            "candidate_count": settings.vector_candidate_count,
-        },
-    ).all()
+    bm25_hits: list[BM25Hit] = []
+    if run_keyword:
+        bm25_rows = db.execute(
+            _BM25_QUERY,
+            {
+                "query": request.query,
+                "court": request.court,
+                "candidate_count": settings.bm25_candidate_count,
+            },
+        ).all()
+        bm25_hits = [BM25Hit(chunk_id=row.chunk_id, rank=row.rank) for row in bm25_rows]
 
-    bm25_hits = [BM25Hit(chunk_id=row.chunk_id, rank=row.rank) for row in bm25_rows]
-    vector_hits = [VectorHit(chunk_id=row.chunk_id, distance=row.distance) for row in vector_rows]
+    vector_hits: list[VectorHit] = []
+    if run_semantic:
+        [query_embedding] = embed_texts([request.query])
+        vector_rows = db.execute(
+            _VECTOR_QUERY,
+            {
+                "embedding": _to_pgvector_literal(query_embedding),
+                "court": request.court,
+                "candidate_count": settings.vector_candidate_count,
+            },
+        ).all()
+        vector_hits = [VectorHit(chunk_id=row.chunk_id, distance=row.distance) for row in vector_rows]
     bm25_chunk_ids = {hit.chunk_id for hit in bm25_hits}
     vector_chunk_ids = {hit.chunk_id for hit in vector_hits}
 

@@ -116,6 +116,10 @@ uv run python scripts/ingest_judgments.py --source data/staging --limit 500
 curl -X POST localhost:8000/search \
   -H "Content-Type: application/json" \
   -d '{"query": "oppression and mismanagement of a company"}'
+
+# 5. (optional) the search UI -- see web/README.md for the full setup,
+#    including a mock-data demo mode that needs no backend at all
+cd web && npm install && npm run dev   # http://localhost:3000
 ```
 
 ## Testing
@@ -136,10 +140,11 @@ Docker build on every push.
 - [x] Two endpoints, ~25 unit tests, integration test on real Postgres
 - [x] Docker + docker-compose (app, db)
 - [x] CI: lint → test → build
+- [x] Production ingestion CLI with real metrics (`scripts/ingest_judgments.py`, `docs/data_pipeline.md`)
+- [x] Search UI (`web/`, Next.js + shadcn/ui) — search, filters, judgment detail panel, dark mode, mock demo mode
 - [ ] Week 1: ~500–1,000 judgments ingested end-to-end, CI green on a pushed branch
 - [ ] Week 2–3: full ~41.8K-judgment corpus ingested as an offline batch job
-- [ ] Deployed to Render + Supabase with a live URL
-- [ ] Week 2 polish: frontend
+- [ ] Deployed to Render + Supabase with a live URL, `web/` deployed alongside it
 - [ ] Later: auth (schema already has a `users` table for it)
 
 ## License
