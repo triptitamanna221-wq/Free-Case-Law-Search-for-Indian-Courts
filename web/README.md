@@ -97,11 +97,19 @@ doesn't compute itself:
 ## Testing
 
 ```bash
-npm run test        # 29 unit tests: query validation, URL param round-tripping,
-                     # breakdown derivation, formatting/highlighting helpers
-npx tsc --noEmit     # strict TypeScript
+npm run test         # 29 unit tests: query validation, URL param round-tripping,
+                      # breakdown derivation, formatting/highlighting helpers
 npx eslint .
+npm run build         # also does the real strict-TypeScript check (see below)
 ```
+
+Type-checking is `npm run build`, not a standalone `npx tsc --noEmit` — this
+app uses Next's typed-routes feature (`LayoutProps<"/">` in `app/layout.tsx`),
+whose declarations `next build`/`next dev` generate into `.next/types` before
+anything can check against them. A bare `tsc --noEmit` run on a fresh
+checkout (nothing in `.next` yet) fails on that missing type even though the
+code is correct — caught by actually reproducing this repo's CI on a clean
+clone, not assumed away.
 
 Verified manually (real browser automation, not just unit tests) against a
 production build in demo mode: page loads, debounced as-you-type search

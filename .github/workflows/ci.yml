@@ -135,6 +135,11 @@ jobs:
           cache-dependency-path: web/package-lock.json
       - run: npm ci
       - run: npx eslint .
-      - run: npx tsc --noEmit
       - run: npm run test
+      # `next build` (not a separate `tsc --noEmit`) is what actually
+      # type-checks this app: it generates Next's route-typing declarations
+      # (e.g. LayoutProps<"/">) before checking against them, and a bare
+      # `tsc --noEmit` run before those exist fails on a fresh checkout even
+      # though the code is fine -- build's own "Running TypeScript..." step
+      # is the real type-check here, not a redundant afterthought.
       - run: npm run build
