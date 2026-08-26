@@ -30,9 +30,10 @@ actually needs.
 
 | Metric | Value |
 |---|---|
-| Judgments indexed | _TBD — pending a full DB-backed ingest run (see `data/ingestion_metrics.json`)_ |
-| Embedding latency (p50 / p95, ms/chunk) | **12.2 / 19.0** — real, from a 300-judgment dry run (`data/ingestion_metrics.json`) |
-| DB insert latency (p50 / p95, ms/record) | _TBD — requires a live Postgres, not available in the environment that built this pipeline_ |
+| Judgments processed | **41,839** — the full corpus, chunked + embedded end-to-end (`data/ingestion_metrics.json`) |
+| Chunks embedded | **883,787** (427.4M tokens total) |
+| Embedding latency (p50 / p95, ms/chunk) | **9.1 / 14.4** — real, from the full 41,839-judgment run (`data/ingestion_metrics.json`) |
+| DB insert latency (p50 / p95, ms/record) | _TBD — requires a live Postgres, not available in the environment that built this pipeline; this run used `--dry-run` (embed-only, no DB writes)_ |
 | Search p50 / p95 latency | _TBD, measured locally against the seeded sample_ |
 | Test coverage | _TBD, `uv run pytest --cov`_ |
 | Uptime | _TBD once deployed_ |

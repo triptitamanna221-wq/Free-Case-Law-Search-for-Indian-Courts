@@ -291,6 +291,7 @@ def process_batch(
     vectors = embed_texts(chunk_texts, model=model, batch_size=args.batch_size, show_progress_bar=True)
     embed_elapsed_ms = (time.perf_counter() - embed_start) * 1000
     metrics.record_embedding_batch(len(chunk_texts), embed_elapsed_ms)
+    metrics.judgments_processed += len(valid_rows)
 
     if args.dry_run:
         logger.info(
@@ -338,7 +339,6 @@ def process_batch(
         return
     db_elapsed_ms = (time.perf_counter() - db_start) * 1000
     metrics.record_db_batch(len(valid_rows), db_elapsed_ms)
-    metrics.judgments_processed += len(valid_rows)
 
 
 def write_metrics(metrics: IngestionMetrics, path: Path) -> None:
