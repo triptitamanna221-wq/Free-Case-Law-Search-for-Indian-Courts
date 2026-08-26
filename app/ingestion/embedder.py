@@ -17,7 +17,9 @@ def get_model() -> Embedder:
     torch/sentence-transformers unless they explicitly ask for the real model."""
     from sentence_transformers import SentenceTransformer
 
-    return SentenceTransformer(EMBEDDING_MODEL_NAME)
+    from app.config import get_settings
+
+    return SentenceTransformer(get_settings().embedding_model)
 
 
 def embed_texts(

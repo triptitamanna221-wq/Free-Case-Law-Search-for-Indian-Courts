@@ -1,0 +1,33 @@
+databases:
+  - name: case-law-db
+    plan: free
+    postgresMajorVersion: "15"
+
+services:
+  - name: case-law-search-api
+    type: web
+    runtime: docker
+    dockerfilePath: ./docker/Dockerfile
+    dockerContext: .
+    plan: free
+    # /health is a plain {"status": "ok"} route (app/main.py) -- lighter than
+    # hitting /docs, which renders the full Swagger UI HTML on every check.
+    healthCheckPath: /health
+    dockerCommand: gunicorn -w 4 -k uvicorn.workers.UvicornWorker app.main:app --bind 0.0.0.0:8000
+    # Runs after each build, before the new version takes traffic. Alembic
+    # is idempotent (each migration checks its own revision), so this is
+    # safe to run on every deploy, not just the first.
+    preDeployCommand: alembic upgrade head
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: case-law-db
+          property: connectionString
+      - key: EMBEDDING_MODEL
+        value: all-MiniLM-L6-v2
+      - key: CORS_ORIGINS
+        # Set to your deployed Vercel URL (e.g. https://your-app.vercel.app)
+        # in the Render dashboard once the frontend is deployed -- left
+        # unset here since no committed value should assume a specific
+        # frontend URL.
+        sync: false

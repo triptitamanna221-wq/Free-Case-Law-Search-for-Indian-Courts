@@ -14,8 +14,7 @@ Elasticsearch/OpenSearch use for hybrid search — so a query gets both an exact
 citation lookup and a "these mean the same thing" match, whichever the search
 actually needs.
 
-**Live demo:** _TBD — filled in after deployment (Render + Supabase, see
-[Deployment](#deployment))._
+**Live demo:** _TBD — filled in once deployed (see [Deployment](#deployment))._
 
 ## What it does
 
@@ -87,11 +86,14 @@ flowchart LR
   turned out to require HuggingFace auth) — short version: no free bulk API,
   ToS-questionable at 50K-document scale, and a bare scraper loop isn't
   itself something worth shipping.
-- **Render (app) + Supabase (Postgres), not Fly.io or Render's own free
-  Postgres.** Render's free Postgres now expires (deletes) after 30 days.
-  Fly.io dropped its free tier for new accounts. Supabase's free Postgres
-  includes pgvector natively and only *pauses* on inactivity — a much safer
-  failure mode for a link that sits unopened between interviews.
+- **Render for both the app and Postgres.** One dashboard, one Blueprint
+  (`render.yaml`), no cross-provider networking to debug. The real tradeoff:
+  Render's free Postgres is deleted (not just paused) after 30 days of
+  inactivity — a genuine risk for a demo link opened weeks after an
+  application goes out. See [Deployment](#deployment) for the mitigation
+  (a scheduled keep-alive query, or a manual recreate-from-`render.yaml`
+  if it does expire — the Blueprint makes that a few minutes of work either
+  way, not a rebuild from scratch).
 
 ## Getting started
 
@@ -133,6 +135,89 @@ uv run pytest -m integration -v   # just the DB-marked subset, same tests/integr
 
 CI (`.github/workflows/ci.yml`) runs lint → unit tests → integration tests →
 Docker build on every push.
+
+## Deployment
+
+Deploys to [Render](https://render.com) via the Blueprint at
+[`render.yaml`](render.yaml): a free Web Service running `docker/Dockerfile`
+plus a free managed Postgres database, wired together automatically.
+
+**This repo has no Render account or API credentials attached to it** — the
+steps below need to be run once, by hand, from the Render dashboard (repo
+connection is an OAuth flow; there's no headless equivalent).
+
+### 1. First deploy
+
+1. Push this repo to GitHub (already done if you're reading this from GitHub).
+2. In the [Render dashboard](https://dashboard.render.com), **New +** →
+   **Blueprint**, connect the GitHub repo. Render reads `render.yaml` and
+   proposes one Web Service (`case-law-search-api`) + one Postgres database
+   (`case-law-db`), both free tier. Confirm.
+3. Render provisions the database first, then builds the Docker image from
+   `docker/Dockerfile`, then runs `alembic upgrade head` as the pre-deploy
+   command (this creates all tables *and* runs `CREATE EXTENSION IF NOT
+   EXISTS vector`, per migration `0001`), then starts
+   `gunicorn -w 4 -k uvicorn.workers.UvicornWorker app.main:app --bind 0.0.0.0:8000`.
+4. **Verify pgvector is actually available**: Render's managed Postgres
+   supports the `vector` extension, but this hasn't been confirmed against
+   a live instance from this environment (no Docker/Postgres access here —
+   see `docs/data_pipeline.md`). If the pre-deploy migration step fails on
+   `CREATE EXTENSION vector`, check Render's Postgres extension list for
+   your plan; the fallback is running Postgres as a second Docker-based
+   private service (`pgvector/pgvector:pg15`, same image CI already uses)
+   instead of Render's managed database.
+5. Once live, health checks hit `GET /health` (a plain `{"status": "ok"}`
+   route — lighter than `GET /docs`, which renders the full Swagger UI on
+   every check).
+
+### 2. Seed data
+
+The free web service has no room to download a corpus, embed it, *and* serve
+traffic within a build/pre-deploy step — and `data/staging/` (the parquet
+this repo's ingestion pipeline reads) isn't committed (550MB, gitignored).
+Seed from your own machine instead, which already has the model cached and
+the corpus staged locally:
+
+```bash
+# find the External Database URL on the case-law-db page in the Render
+# dashboard -- looks like postgresql://user:pass@host.render.com/db
+DATABASE_URL="<paste External Database URL>" \
+  uv run python scripts/ingest_judgments.py --source data/staging --limit 100
+```
+
+`app/config.py` normalizes a plain `postgres://`/`postgresql://` URL (what
+Render hands back) to the `postgresql+psycopg://` form SQLAlchemy needs —
+no manual edit required. Drop `--limit 100` to seed the full corpus instead
+(expect several hours; see `data/ingestion_metrics.json` for real per-chunk
+timing from the full run).
+
+### 3. Environment variables
+
+`DATABASE_URL` and `EMBEDDING_MODEL` are wired automatically by
+`render.yaml`. Set `CORS_ORIGINS` by hand in the Render dashboard once the
+frontend has a real URL (Environment tab, e.g.
+`CORS_ORIGINS=https://your-app.vercel.app`) — left unset in the Blueprint
+since no committed value should assume a specific deployment.
+
+### 4. Verifying the live deployment
+
+Once deployed, from your own machine:
+
+```bash
+curl https://<your-service>.onrender.com/health
+curl -X POST https://<your-service>.onrender.com/search \
+  -H "Content-Type: application/json" \
+  -d '{"query": "oppression and mismanagement of a company"}'
+curl https://<your-service>.onrender.com/judgments/1
+```
+
+Two things worth measuring and recording here once you have a live URL,
+rather than assumed: actual `/search` latency (the free-tier instance has a
+fraction of a dev machine's CPU, so real numbers may differ from the
+embedding-latency figures above, which were measured locally), and cold-start
+latency after the free tier's idle spin-down (Render free services sleep
+after 15 minutes of no traffic; the next request pays a rebuild-container
+cost typically in the tens of seconds).
 
 ## Roadmap
 
