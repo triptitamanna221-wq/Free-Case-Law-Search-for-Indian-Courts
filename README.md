@@ -159,15 +159,21 @@ connection is an OAuth flow; there's no headless equivalent).
    `gunicorn -w 1 --timeout 120 -k uvicorn.workers.UvicornWorker app.main:app --bind 0.0.0.0:8000`
    (single worker, generous timeout — see the comment in `render.yaml` for
    why: Render's free instance is 512MB RAM / 0.1 CPU, real numbers that
-   `-w 4` and the gunicorn default 30s timeout genuinely don't survive here —
-   observed as a 502 after the model load blew past it on first deploy).
+   `-w 4` genuinely doesn't fit in). `app/main.py`'s `lifespan` hook loads
+   the embedding model once at startup, before the app starts accepting
+   traffic — this is a real fix, not caution: loading it lazily on the
+   first `/search` request instead pegged the container's only 0.1 CPU
+   mid-request, starved `/health` of CPU until it started failing, and
+   Render restarted the service before the load ever finished. Loading it
+   at startup means the same CPU cost is paid during the boot grace period
+   instead, so expect the first deploy to take longer to go "Live" than the
+   build step alone would suggest — that's the model loading, not a stall.
    **The service comes up with no tables yet** — free web services can't run
    a pre-deploy command (see "Manual Migrations" below), so this is a
    required manual step, not optional cleanup.
 4. Once live, health checks hit `GET /health` (a plain `{"status": "ok"}`
    route — lighter than `GET /docs`, which renders the full Swagger UI on
-   every check). It'll return 200 even before migrations run, since it
-   doesn't touch the database — don't take a green health check as
+   every check). It doesn't touch the database, so it going green is not
    confirmation the schema exists; `/search` returning 500 instead of an
    empty result set is the real signal migrations haven't run (step 3).
 

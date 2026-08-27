@@ -19,11 +19,14 @@ services:
     # 4 workers each loading their own copy doesn't fit in 512MB. A single
     # worker serializes requests, which is the right tradeoff for a low-
     # traffic demo over risking an OOM kill.
-    # --timeout 120: on 0.1 CPU, loading the model on a cold worker measured
-    # well past gunicorn's 30s default, which killed the request outright
-    # (observed as a 502 after Render's proxy gave up). The Dockerfile now
-    # bakes the model into the image so this is disk-load time, not a
-    # network download, but 0.1 CPU is still slow enough to need the margin.
+    # --timeout 120: safety margin for slow requests on 0.1 CPU. The model
+    # itself no longer loads inside a request -- app/main.py's lifespan hook
+    # loads it once at startup instead. That fix was necessary, not optional:
+    # loading it lazily on the first /search request pegged the only
+    # available CPU mid-request, starved /health of CPU until it started
+    # failing, and Render restarted the container before the load ever
+    # finished -- observed live as a 502 followed by a clean gunicorn
+    # restart in the logs, twice, at both -w 4 and -w 1.
     dockerCommand: gunicorn -w 1 --timeout 120 -k uvicorn.workers.UvicornWorker app.main:app --bind 0.0.0.0:8000
     # No preDeployCommand: Render restricts it to paid web services, private
     # services, and background workers -- free web services aren't eligible
