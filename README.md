@@ -88,12 +88,13 @@ flowchart LR
   itself something worth shipping.
 - **Render for both the app and Postgres.** One dashboard, one Blueprint
   (`render.yaml`), no cross-provider networking to debug. The real tradeoff:
-  Render's free Postgres is deleted (not just paused) after 30 days of
-  inactivity — a genuine risk for a demo link opened weeks after an
-  application goes out. See [Deployment](#deployment) for the mitigation
-  (a scheduled keep-alive query, or a manual recreate-from-`render.yaml`
-  if it does expire — the Blueprint makes that a few minutes of work either
-  way, not a rebuild from scratch).
+  Render's free Postgres expires **30 days after creation** — a fixed clock,
+  not activity-based, so a keep-alive query wouldn't prevent it — with a
+  14-day grace period to upgrade before it's permanently deleted. A genuine
+  risk for a demo link opened weeks after an application goes out. See
+  [Deployment](#deployment) for the plan: re-run the Blueprint and reseed
+  (a few minutes of work, not a rebuild) shortly before the 30-day mark, or
+  upgrade the database to a paid plan once this is the one you're keeping.
 
 ## Getting started
 
@@ -154,44 +155,98 @@ connection is an OAuth flow; there's no headless equivalent).
    proposes one Web Service (`case-law-search-api`) + one Postgres database
    (`case-law-db`), both free tier. Confirm.
 3. Render provisions the database first, then builds the Docker image from
-   `docker/Dockerfile`, then runs `alembic upgrade head` as the pre-deploy
-   command (this creates all tables *and* runs `CREATE EXTENSION IF NOT
-   EXISTS vector`, per migration `0001`), then starts
+   `docker/Dockerfile`, then starts
    `gunicorn -w 4 -k uvicorn.workers.UvicornWorker app.main:app --bind 0.0.0.0:8000`.
-4. **Verify pgvector is actually available**: Render's managed Postgres
-   supports the `vector` extension, but this hasn't been confirmed against
-   a live instance from this environment (no Docker/Postgres access here —
-   see `docs/data_pipeline.md`). If the pre-deploy migration step fails on
-   `CREATE EXTENSION vector`, check Render's Postgres extension list for
-   your plan; the fallback is running Postgres as a second Docker-based
-   private service (`pgvector/pgvector:pg15`, same image CI already uses)
-   instead of Render's managed database.
-5. Once live, health checks hit `GET /health` (a plain `{"status": "ok"}`
+   **The service comes up with no tables yet** — free web services can't run
+   a pre-deploy command (see "Manual Migrations" below), so this is a
+   required manual step, not optional cleanup.
+4. Once live, health checks hit `GET /health` (a plain `{"status": "ok"}`
    route — lighter than `GET /docs`, which renders the full Swagger UI on
-   every check).
+   every check). It'll return 200 even before migrations run, since it
+   doesn't touch the database — don't take a green health check as
+   confirmation the schema exists; `/search` returning 500 instead of an
+   empty result set is the real signal migrations haven't run (step 3).
 
-### 2. Seed data
+### 2. Manual migrations
 
-The free web service has no room to download a corpus, embed it, *and* serve
-traffic within a build/pre-deploy step — and `data/staging/` (the parquet
-this repo's ingestion pipeline reads) isn't committed (550MB, gitignored).
-Seed from your own machine instead, which already has the model cached and
-the corpus staged locally:
+Render restricts `preDeployCommand` to paid web services, private services,
+and background workers — free web services aren't eligible, confirmed
+against Render's own docs. So migrations have to be triggered by hand, once,
+right after the first deploy (and again after any future migration is added).
+
+**Do not** work around this with an `@app.on_event("startup")` hook in
+`app/main.py`. `render.yaml` starts gunicorn with `-w 4` — four worker
+processes — and a startup hook fires in every one of them, so four processes
+would run `alembic upgrade head` concurrently against the same database. Run
+it from exactly one place, one time.
+
+**Method A — from your local machine (recommended: no Render plan
+restriction, and reuses `app/config.py`'s URL handling):**
 
 ```bash
 # find the External Database URL on the case-law-db page in the Render
-# dashboard -- looks like postgresql://user:pass@host.render.com/db
-DATABASE_URL="<paste External Database URL>" \
-  uv run python scripts/ingest_judgments.py --source data/staging --limit 100
+# dashboard -- looks like postgres://user:pass@host.render.com/db
+export DATABASE_URL="<paste External Database URL>"
+cd ~/Free-Case-Law-Search-for-Indian-Courts
+uv run alembic upgrade head
 ```
 
-`app/config.py` normalizes a plain `postgres://`/`postgresql://` URL (what
-Render hands back) to the `postgresql+psycopg://` form SQLAlchemy needs —
-no manual edit required. Drop `--limit 100` to seed the full corpus instead
-(expect several hours; see `data/ingestion_metrics.json` for real per-chunk
-timing from the full run).
+This creates all tables and runs `CREATE EXTENSION IF NOT EXISTS vector`
+(part of migration `0001`) against the real Render database.
+`app/config.py` normalizes the plain `postgres://`/`postgresql://` URL
+Render hands back to the `postgresql+psycopg://` form SQLAlchemy needs — no
+manual edit required.
 
-### 3. Environment variables
+**Method B — via Render's dashboard Shell:** not available here — Shell/SSH
+access is restricted to paid instance types (confirmed against Render's
+docs), same restriction as `preDeployCommand`. It becomes an option only if
+the web service is upgraded off the free tier; Method A works regardless of
+plan, so it's the one to use.
+
+**Verify pgvector is actually available** the first time you run this: if it
+fails on `CREATE EXTENSION vector`, check Render's Postgres extension list
+for your plan — the fallback is running Postgres as a second Docker-based
+private service (`pgvector/pgvector:pg15`, same image CI already uses)
+instead of Render's managed database.
+
+### 3. Validate the deployment
+
+```bash
+curl https://<your-service>.onrender.com/health
+# {"status":"ok"} -- confirms the app is up, not that migrations ran
+
+curl -X POST https://<your-service>.onrender.com/search \
+  -H "Content-Type: application/json" \
+  -d '{"query": "oppression and mismanagement of a company", "search_mode": "hybrid"}'
+# a 500 here means migrations haven't run yet (tables don't exist) --
+# go back to step 2. A 200 with "results": [] is expected and fine at this
+# point: migrations succeeded, there's just no data until "Seed data" runs.
+```
+
+### 4. Seed data
+
+The free web service has no room to download a corpus, embed it, *and* serve
+traffic within a build step — and `data/staging/` (the parquet this repo's
+ingestion pipeline reads) isn't committed (550MB, gitignored). Seed from
+your own machine instead, which already has the model cached and the corpus
+staged locally:
+
+```bash
+export DATABASE_URL="<paste External Database URL>"
+uv run python scripts/ingest_judgments.py --source data/staging --limit 100 --batch-size 32
+```
+
+**Keep `--limit 100`** — don't drop it to seed the full corpus. Render's
+free Postgres has a **fixed 1GB storage cap**; the full 41,839-judgment
+corpus produces 883,787 chunks, and the embeddings alone
+(883,787 × 384 floats × 4 bytes ≈ 1.3GB) already exceed that on their own,
+before raw text, indexes, or the HNSW index's own overhead. A full-corpus
+run against this database would fail partway through on disk-full, after
+burning real time getting there. 100 judgments (~2,000 chunks, well under
+the cap) is enough to prove the deployed pipeline end-to-end; a bigger
+sample only makes sense on a paid Postgres plan sized for it.
+
+### 5. Environment variables
 
 `DATABASE_URL` and `EMBEDDING_MODEL` are wired automatically by
 `render.yaml`. Set `CORS_ORIGINS` by hand in the Render dashboard once the
@@ -199,15 +254,13 @@ frontend has a real URL (Environment tab, e.g.
 `CORS_ORIGINS=https://your-app.vercel.app`) — left unset in the Blueprint
 since no committed value should assume a specific deployment.
 
-### 4. Verifying the live deployment
+### 6. Post-seed validation
 
-Once deployed, from your own machine:
+Once seeded, re-run the `/search` call from step 3 — it should now return
+real ranked results instead of an empty/error response — and check
+retrieval by id:
 
 ```bash
-curl https://<your-service>.onrender.com/health
-curl -X POST https://<your-service>.onrender.com/search \
-  -H "Content-Type: application/json" \
-  -d '{"query": "oppression and mismanagement of a company"}'
 curl https://<your-service>.onrender.com/judgments/1
 ```
 

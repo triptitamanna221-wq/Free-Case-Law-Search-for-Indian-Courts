@@ -14,10 +14,14 @@ services:
     # hitting /docs, which renders the full Swagger UI HTML on every check.
     healthCheckPath: /health
     dockerCommand: gunicorn -w 4 -k uvicorn.workers.UvicornWorker app.main:app --bind 0.0.0.0:8000
-    # Runs after each build, before the new version takes traffic. Alembic
-    # is idempotent (each migration checks its own revision), so this is
-    # safe to run on every deploy, not just the first.
-    preDeployCommand: alembic upgrade head
+    # No preDeployCommand: Render restricts it to paid web services, private
+    # services, and background workers -- free web services aren't eligible
+    # (confirmed against Render's docs), so it can't run migrations here.
+    # Migrations are run manually, once, after the first deploy -- see the
+    # "Manual Migrations" section in README.md. Do NOT replace this with an
+    # @app.on_event("startup") hook: gunicorn runs -w 4 worker processes, so
+    # a startup hook would run the migration concurrently in all four,
+    # racing against the same database.
     envVars:
       - key: DATABASE_URL
         fromDatabase:
