@@ -43,6 +43,17 @@ COPY --from=builder /app/README.md ./
 
 ENV PATH="/app/.venv/bin:$PATH"
 
+# Pre-download the embedding model into the image so a cold container never
+# needs a network round-trip to HuggingFace on its first /search request --
+# on Render's free instance (0.1 CPU, 512MB RAM) that download-plus-load was
+# measured taking well past gunicorn's default 30s worker timeout, killing
+# the request. This only warms the cache for the EMBEDDING_MODEL default
+# (all-MiniLM-L6-v2); overriding that env var at runtime still works, it
+# just pays a real download on its own first request instead of using this
+# baked-in cache.
+ENV HF_HOME=/app/.cache/huggingface
+RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('all-MiniLM-L6-v2')"
+
 EXPOSE 8000
 
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

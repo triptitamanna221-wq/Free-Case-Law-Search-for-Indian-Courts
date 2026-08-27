@@ -156,7 +156,11 @@ connection is an OAuth flow; there's no headless equivalent).
    (`case-law-db`), both free tier. Confirm.
 3. Render provisions the database first, then builds the Docker image from
    `docker/Dockerfile`, then starts
-   `gunicorn -w 4 -k uvicorn.workers.UvicornWorker app.main:app --bind 0.0.0.0:8000`.
+   `gunicorn -w 1 --timeout 120 -k uvicorn.workers.UvicornWorker app.main:app --bind 0.0.0.0:8000`
+   (single worker, generous timeout — see the comment in `render.yaml` for
+   why: Render's free instance is 512MB RAM / 0.1 CPU, real numbers that
+   `-w 4` and the gunicorn default 30s timeout genuinely don't survive here —
+   observed as a 502 after the model load blew past it on first deploy).
    **The service comes up with no tables yet** — free web services can't run
    a pre-deploy command (see "Manual Migrations" below), so this is a
    required manual step, not optional cleanup.
@@ -175,10 +179,14 @@ against Render's own docs. So migrations have to be triggered by hand, once,
 right after the first deploy (and again after any future migration is added).
 
 **Do not** work around this with an `@app.on_event("startup")` hook in
-`app/main.py`. `render.yaml` starts gunicorn with `-w 4` — four worker
-processes — and a startup hook fires in every one of them, so four processes
-would run `alembic upgrade head` concurrently against the same database. Run
-it from exactly one place, one time.
+`app/main.py`, even though `render.yaml` runs a single gunicorn worker today
+(`-w 1` — see the comment there for why: Render's free instance is 512MB
+RAM / 0.1 CPU, too little to load the embedding model once per worker at
+`-w 4`). A startup hook ties migration success to every container
+start/restart instead of one controlled, observable step, and would
+reintroduce a real race — migrations running concurrently across worker
+processes — the moment worker count goes back above one. Run migrations
+from exactly one place, one time, by hand.
 
 **Method A — from your local machine (recommended: no Render plan
 restriction, and reuses `app/config.py`'s URL handling):**
