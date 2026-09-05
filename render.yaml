@@ -14,19 +14,25 @@ services:
     # hitting /docs, which renders the full Swagger UI HTML on every check.
     healthCheckPath: /health
     # -w 1: Render's free instance is 512MB RAM / 0.1 CPU (confirmed against
-    # Render's own community docs). The embedding model (~90MB on disk, more
-    # once loaded as PyTorch tensors) is loaded once per worker process --
-    # 4 workers each loading their own copy doesn't fit in 512MB. A single
-    # worker serializes requests, which is the right tradeoff for a low-
-    # traffic demo over risking an OOM kill.
-    # --timeout 120: safety margin for slow requests on 0.1 CPU. The model
-    # itself no longer loads inside a request -- app/main.py's lifespan hook
-    # loads it once at startup instead. That fix was necessary, not optional:
-    # loading it lazily on the first /search request pegged the only
-    # available CPU mid-request, starved /health of CPU until it started
-    # failing, and Render restarted the container before the load ever
-    # finished -- observed live as a 502 followed by a clean gunicorn
-    # restart in the logs, twice, at both -w 4 and -w 1.
+    # Render's own community docs). The embedding model is loaded once per
+    # worker process, so worker count multiplies the largest cost in the
+    # container. Measured peak for the onnx serving path is ~290MB for one
+    # worker; a second would not fit. A single worker serializes requests,
+    # which is the right tradeoff for a low-traffic demo.
+    # --timeout 120: safety margin for slow requests on 0.1 CPU -- one tenth
+    # of a core makes even modest work take multiples of what it does on a
+    # dev machine.
+    #
+    # History worth not repeating: this ran out of memory, not out of time.
+    # The original torch-based serving path peaked at ~350MB in one worker
+    # (~315MB of that just `import torch`, before any weights load), which
+    # against the 512MB container cap meant the kernel OOM-killed the whole
+    # container the moment /search triggered that import -- no traceback, no
+    # gunicorn WORKER TIMEOUT, just a fresh container with gunicorn back at
+    # pid 1. Neither -w 1 nor --timeout fixed it, and eagerly loading at
+    # startup only moved the OOM into boot, crash-looping so even /health
+    # never answered. The fix was making the serving path smaller:
+    # app/ingestion/onnx_embedder.py runs the same weights via onnxruntime.
     dockerCommand: gunicorn -w 1 --timeout 120 -k uvicorn.workers.UvicornWorker app.main:app --bind 0.0.0.0:8000
     # No preDeployCommand: Render restricts it to paid web services, private
     # services, and background workers -- free web services aren't eligible

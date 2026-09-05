@@ -80,6 +80,16 @@ flowchart LR
   *final* row count and gives poor recall if built before the table is
   populated — a bad fit for a resumable, incrementally-growing ingest. HNSW
   builds incrementally with better recall/latency at this scale.
+- **onnxruntime for serving, sentence-transformers for ingestion.** Same
+  model (`all-MiniLM-L6-v2`), same weights, same 384-dim vectors — but the
+  API process never imports torch. This wasn't a micro-optimization: the
+  torch serving path peaks at ~350MB RSS in a single worker, ~315MB of which
+  is `import torch` before any weights load, against a 512MB container. The
+  kernel OOM-killed the container on every `/search`. Ingestion keeps the
+  torch path, since it runs on a laptop with no memory ceiling and its output
+  is already in the database. `tests/models/` asserts the two paths agree to
+  cosine > 0.9999 (observed max difference ~1e-7) and that the serving path
+  never pulls torch back in.
 - **An open HF dataset, not scraping Indian Kanoon directly.** See
   [`docs/data_sources.md`](docs/data_sources.md) for the full reasoning and
   history (including a pivot away from two originally-planned datasets that
@@ -130,6 +140,7 @@ cd web && npm install && npm run dev   # http://localhost:3000
 
 ```bash
 uv run pytest tests/unit          # 36 tests, no DB/network required
+uv run pytest tests/models        # onnx vs sentence-transformers equivalence (no DB)
 uv run pytest tests/integration   # spins up a real pgvector/pgvector:pg15 container
 uv run pytest -m integration -v   # just the DB-marked subset, same tests/integration/ tree
 ```
@@ -158,16 +169,13 @@ connection is an OAuth flow; there's no headless equivalent).
    `docker/Dockerfile`, then starts
    `gunicorn -w 1 --timeout 120 -k uvicorn.workers.UvicornWorker app.main:app --bind 0.0.0.0:8000`
    (single worker, generous timeout — see the comment in `render.yaml` for
-   why: Render's free instance is 512MB RAM / 0.1 CPU, real numbers that
-   `-w 4` genuinely doesn't fit in). `app/main.py`'s `lifespan` hook loads
-   the embedding model once at startup, before the app starts accepting
-   traffic — this is a real fix, not caution: loading it lazily on the
-   first `/search` request instead pegged the container's only 0.1 CPU
-   mid-request, starved `/health` of CPU until it started failing, and
-   Render restarted the service before the load ever finished. Loading it
-   at startup means the same CPU cost is paid during the boot grace period
-   instead, so expect the first deploy to take longer to go "Live" than the
-   build step alone would suggest — that's the model loading, not a stall.
+   why: Render's free instance is 512MB RAM / 0.1 CPU, and the embedding
+   model is loaded once *per worker*, so worker count multiplies the biggest
+   cost in the container). The model loads lazily, on the first `/search`
+   request; at ~290MB peak for the onnx path there's headroom for that,
+   where the torch path had none. If you ever see the container restart with
+   no traceback and gunicorn coming back at pid 1, suspect memory before
+   timeouts — that signature is a kernel OOM kill, not an application error.
    **The service comes up with no tables yet** — free web services can't run
    a pre-deploy command (see "Manual Migrations" below), so this is a
    required manual step, not optional cleanup.

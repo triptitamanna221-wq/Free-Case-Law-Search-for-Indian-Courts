@@ -43,16 +43,19 @@ COPY --from=builder /app/README.md ./
 
 ENV PATH="/app/.venv/bin:$PATH"
 
-# Pre-download the embedding model into the image so a cold container never
-# needs a network round-trip to HuggingFace on its first /search request --
-# on Render's free instance (0.1 CPU, 512MB RAM) that download-plus-load was
-# measured taking well past gunicorn's default 30s worker timeout, killing
-# the request. This only warms the cache for the EMBEDDING_MODEL default
-# (all-MiniLM-L6-v2); overriding that env var at runtime still works, it
-# just pays a real download on its own first request instead of using this
-# baked-in cache.
+# Bake the onnx model + tokenizer into the image so a cold container never
+# needs a network round-trip to HuggingFace on its first /search request.
+# Calling the real accessors (rather than hardcoding filenames) both fetches
+# exactly what the serving path loads and fails the build here, loudly, if
+# the session can't be constructed -- better than discovering that on the
+# first production request.
+#
+# Note this deliberately does NOT warm the sentence-transformers/torch cache:
+# that path is for ingestion, which runs off-container, and importing torch
+# in the API process is what was OOM-killing it (~315MB for the import alone
+# against a 512MB cap).
 ENV HF_HOME=/app/.cache/huggingface
-RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('all-MiniLM-L6-v2')"
+RUN python -c "from app.ingestion.onnx_embedder import get_session, get_tokenizer; get_session(); get_tokenizer()"
 
 EXPOSE 8000
 

@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_db
 from app.config import Settings, get_settings
-from app.ingestion.embedder import embed_texts
+from app.ingestion.onnx_embedder import embed_texts_onnx
 from app.schemas.search import SearchRequest, SearchResponse, SearchResultItem
 from hybrid_search import BM25Hit, VectorHit, reciprocal_rank_fusion
 
@@ -82,7 +82,11 @@ def search(
 
     vector_hits: list[VectorHit] = []
     if run_semantic:
-        [query_embedding] = embed_texts([request.query])
+        # onnx path, not the sentence-transformers one used during ingestion:
+        # identical weights and vectors (see app/ingestion/onnx_embedder.py),
+        # but without importing torch, which alone costs more RSS than the
+        # whole serving container is allowed.
+        [query_embedding] = embed_texts_onnx([request.query])
         vector_rows = db.execute(
             _VECTOR_QUERY,
             {

@@ -5,6 +5,13 @@ from app.ingestion.embedder import embed_texts
 
 pytestmark = pytest.mark.integration
 
+# Seeding deliberately uses the sentence-transformers path while /search
+# embeds the query through the onnx path -- that asymmetry mirrors production
+# exactly (the corpus in Postgres was written by the ingestion pipeline, and
+# the API embeds queries without torch), so these tests exercise the real
+# cross-path comparison rather than a self-consistent illusion. The two are
+# asserted equivalent in tests/models/test_onnx_matches_torch.py.
+
 KEYWORD_CHUNK_TEXT = (
     "The right to privacy is a fundamental right protected under Article 21 "
     "of the Constitution of India."

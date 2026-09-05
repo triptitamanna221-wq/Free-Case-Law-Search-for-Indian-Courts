@@ -61,6 +61,13 @@ jobs:
           key: hf-all-MiniLM-L6-v2
       - name: Unit tests
         run: uv run pytest tests/unit -v --cov --cov-report=term-missing
+      - name: Embedding-model tests
+        # Guards that the onnx serving path still produces the same vectors as
+        # the sentence-transformers path used during ingestion, and that it
+        # never pulls torch into the API process (which OOM-killed the
+        # container on Render's 512MB free tier). No database needed; the HF
+        # cache step above keeps the model download off the critical path.
+        run: uv run pytest tests/models -v
       - name: Wait for Postgres
         # Belt-and-suspenders: the service's own --health-cmd already blocks
         # step start-up until `pg_isready` succeeds, but this makes the wait

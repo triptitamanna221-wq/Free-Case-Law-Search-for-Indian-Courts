@@ -19,6 +19,14 @@ dependencies = [
     "tqdm>=4.66",
     "psutil>=5.9",
     "gunicorn>=23.0",
+    # Serving-time embedding path. sentence-transformers/torch stays in the
+    # dependency list for the *ingestion* pipeline (which runs on a laptop
+    # with no memory ceiling), but the API process must never import torch:
+    # measured at ~315MB RSS for the import alone, against Render's 512MB
+    # container limit. onnxruntime runs the same all-MiniLM-L6-v2 weights.
+    "onnxruntime>=1.19",
+    "tokenizers>=0.20",
+    "numpy>=1.26",
 ]
 
 [dependency-groups]
@@ -45,7 +53,10 @@ ignore = ["B008"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
-markers = ["integration: requires a real Postgres+pgvector database"]
+markers = [
+    "integration: requires a real Postgres+pgvector database",
+    "models: downloads and runs the real embedding models (no DB needed)",
+]
 
 [tool.coverage.run]
 source = ["app", "hybrid_search"]
