@@ -57,6 +57,14 @@ ENV PATH="/app/.venv/bin:$PATH"
 ENV HF_HOME=/app/.cache/huggingface
 RUN python -c "from app.ingestion.onnx_embedder import get_session, get_tokenizer; get_session(); get_tokenizer()"
 
+# With the files baked in above, huggingface_hub still round-trips to the Hub
+# at runtime to revalidate etags (~0.8s locally on a fast connection, and an
+# unbounded stall if the Hub is slow or unreachable from the container). The
+# image is self-contained, so refuse network lookups outright: cache hit or
+# loud failure, no silent dependency on huggingface.co being up to serve a
+# search request.
+ENV HF_HUB_OFFLINE=1
+
 EXPOSE 8000
 
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

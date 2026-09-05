@@ -33,7 +33,8 @@ actually needs.
 | Chunks embedded | **883,787** (427.4M tokens total) |
 | Embedding latency (p50 / p95, ms/chunk) | **9.1 / 14.4** — real, from the full 41,839-judgment run (`data/ingestion_metrics.json`) |
 | DB insert latency (p50 / p95, ms/record) | _TBD — requires a live Postgres, not available in the environment that built this pipeline; this run used `--dry-run` (embed-only, no DB writes)_ |
-| Search p50 / p95 latency | _TBD, measured locally against the seeded sample_ |
+| Search latency, deployed (Render free) | **~3.7s hybrid, 71ms keyword** — measured against the live service. The gap is the query embedding: on a 0.1 CPU instance one forward pass costs ~3.6s, versus ~5ms locally. The Postgres side is the 71ms. Not an algorithmic problem — a hardware one, and the honest number for this tier |
+| Serving memory peak | **~290MB** (onnxruntime path) vs **351MB** (torch), against a 512MB container — see the onnx bullet under [Why these choices](#why-these-choices) |
 | Test coverage | _TBD, `uv run pytest --cov`_ |
 | Uptime | _TBD once deployed_ |
 
@@ -171,11 +172,12 @@ connection is an OAuth flow; there's no headless equivalent).
    (single worker, generous timeout — see the comment in `render.yaml` for
    why: Render's free instance is 512MB RAM / 0.1 CPU, and the embedding
    model is loaded once *per worker*, so worker count multiplies the biggest
-   cost in the container). The model loads lazily, on the first `/search`
-   request; at ~290MB peak for the onnx path there's headroom for that,
-   where the torch path had none. If you ever see the container restart with
-   no traceback and gunicorn coming back at pid 1, suspect memory before
-   timeouts — that signature is a kernel OOM kill, not an application error.
+   cost in the container). `app/main.py`'s `lifespan` hook warms the onnx
+   session during boot, so the first visitor after an idle spin-down doesn't
+   pay session init on top of Render's own ~1 minute wake-up. If you ever
+   see the container restart with no traceback and gunicorn coming back at
+   pid 1, suspect memory before timeouts — that signature is a kernel OOM
+   kill, not an application error.
    **The service comes up with no tables yet** — free web services can't run
    a pre-deploy command (see "Manual Migrations" below), so this is a
    required manual step, not optional cleanup.
