@@ -14,7 +14,16 @@ Elasticsearch/OpenSearch use for hybrid search — so a query gets both an exact
 citation lookup and a "these mean the same thing" match, whichever the search
 actually needs.
 
-**Live demo:** _TBD — filled in once deployed (see [Deployment](#deployment))._
+**Live demo:** <https://case-law-search-api.onrender.com/docs> — seeded with a
+100-judgment sample (Render's free Postgres caps at 1GB; the full corpus needs
+a paid plan). First request after an idle period takes ~2 minutes to wake the
+free-tier container; everything after that is fast. Try:
+
+```bash
+curl -X POST https://case-law-search-api.onrender.com/search \
+  -H "Content-Type: application/json" \
+  -d '{"query": "a company run into the ground by its own directors", "search_mode": "semantic"}'
+```
 
 ## What it does
 
@@ -32,8 +41,9 @@ actually needs.
 | Judgments processed | **41,839** — the full corpus, chunked + embedded end-to-end (`data/ingestion_metrics.json`) |
 | Chunks embedded | **883,787** (427.4M tokens total) |
 | Embedding latency (p50 / p95, ms/chunk) | **9.1 / 14.4** — real, from the full 41,839-judgment run (`data/ingestion_metrics.json`) |
-| DB insert latency (p50 / p95, ms/record) | _TBD — requires a live Postgres, not available in the environment that built this pipeline; this run used `--dry-run` (embed-only, no DB writes)_ |
-| Search latency, deployed (Render free) | **~3.7s hybrid, 71ms keyword** — measured against the live service. The gap is the query embedding: on a 0.1 CPU instance one forward pass costs ~3.6s, versus ~5ms locally. The Postgres side is the 71ms. Not an algorithmic problem — a hardware one, and the honest number for this tier |
+| DB insert latency | **~2.0s per judgment** (judgment row + its ~25 chunk rows, each carrying a 384-dim vector), writing from a laptop to Render's Postgres in Oregon over the public internet. A single-batch measurement from the seed run (`data/seed_metrics_render.json`), not a distribution — network round-trip dominates it, so it says more about the link than the schema |
+| Search latency, deployed (Render free) | **~30ms hybrid, ~15ms semantic, ~4ms keyword** — measured against the live service with the 100-judgment corpus actually seeded |
+| Cold start, deployed (Render free) | **~2 min** for the first request after an idle spin-down: Render sleeps free containers after 15 minutes, and the container doesn't accept traffic until `lifespan` has loaded the onnx session. Warm requests are unaffected |
 | Serving memory peak | **~290MB** (onnxruntime path) vs **351MB** (torch), against a 512MB container — see the onnx bullet under [Why these choices](#why-these-choices) |
 | Test coverage | _TBD, `uv run pytest --cov`_ |
 | Uptime | _TBD once deployed_ |
@@ -257,8 +267,14 @@ staged locally:
 
 ```bash
 export DATABASE_URL="<paste External Database URL>"
-uv run python scripts/ingest_judgments.py --source data/staging --limit 100 --batch-size 32
+uv run python scripts/ingest_judgments.py --source data/staging --limit 100 --batch-size 32 \
+  --metrics-path data/seed_metrics_render.json
 ```
+
+Pass `--metrics-path`. Without it the run writes to `data/ingestion_metrics.json`
+and overwrites the full-corpus figures recorded there (41,839 judgments /
+883,787 chunks) with this 100-judgment sample — they're separate results and
+both worth keeping.
 
 **Keep `--limit 100`** — don't drop it to seed the full corpus. Render's
 free Postgres has a **fixed 1GB storage cap**; the full 41,839-judgment
@@ -305,9 +321,15 @@ cost typically in the tens of seconds).
 - [x] CI: lint → test → build
 - [x] Production ingestion CLI with real metrics (`scripts/ingest_judgments.py`, `docs/data_pipeline.md`)
 - [x] Search UI (`web/`, Next.js + shadcn/ui) — search, filters, judgment detail panel, dark mode, mock demo mode
-- [ ] Week 1: ~500–1,000 judgments ingested end-to-end, CI green on a pushed branch
-- [ ] Week 2–3: full ~41.8K-judgment corpus ingested as an offline batch job
-- [ ] Deployed to Render + Supabase with a live URL, `web/` deployed alongside it
+- [x] Backend deployed to Render with a live URL, migrations applied, 100
+      judgments seeded, `/search` and `/judgments/{id}` verified against it
+- [x] Full ~41.8K-judgment corpus chunked + embedded end-to-end (`--dry-run`:
+      embed-only, measured, not written to a database)
+- [ ] Full corpus *loaded into* Postgres — blocked on storage, not code: the
+      embeddings alone are ~1.3GB against Render free Postgres's 1GB cap, so
+      this needs a paid database plan
+- [ ] `web/` deployed alongside the API (set `CORS_ORIGINS` on the service
+      once it has a URL)
 - [ ] Later: auth (schema already has a `users` table for it)
 
 ## License
