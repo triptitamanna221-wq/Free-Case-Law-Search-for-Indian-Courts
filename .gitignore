@@ -11,3 +11,6 @@ dist/
 build/
 .coverage
 htmlcov/
+
+# Scratch reports generated alongside the project, not part of it
+Claude outputs/
