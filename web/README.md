@@ -139,6 +139,35 @@ for that.
 npm run build && npm run start   # port 3000
 ```
 
-Set `API_BASE_URL` to the deployed backend's URL in the platform's env config
-(e.g. Render: `https://case-law-search-api.onrender.com`). Deploys cleanly to
-Vercel (zero-config for Next.js), Netlify, or Render as a Node web service.
+Deploys zero-config to Vercel (also fine on Netlify, or Render as a Node web
+service). Two environment variables, set in the platform's dashboard —
+**not** in a committed file, since `.gitignore` excludes `.env*`:
+
+| Variable | Value | Read where |
+|---|---|---|
+| `API_BASE_URL` | `https://case-law-search-api.onrender.com` | Server-side, at request time, by `app/api/*/route.ts` |
+| `NEXT_PUBLIC_USE_MOCK_DATA` | `false` | Client bundle, inlined at **build** time |
+
+Two things that bite here:
+
+- **`API_BASE_URL` has no `NEXT_PUBLIC_` prefix, and must not get one.** The
+  browser never calls the backend directly; it calls this app's own
+  same-origin `/api/*` routes, which proxy server-side. Setting
+  `NEXT_PUBLIC_API_BASE_URL` instead does nothing — the proxy falls back to
+  `http://localhost:8000` and every search fails in production.
+- **`NEXT_PUBLIC_USE_MOCK_DATA` is baked in at build time**, not read at
+  runtime. Changing it in the dashboard requires a redeploy to take effect.
+
+Because the proxy keeps all browser traffic same-origin, the FastAPI backend
+needs **no CORS configuration** for this frontend — `CORS_ORIGINS` can stay
+unset unless something else calls the API directly from a browser.
+
+### Vercel, step by step
+
+1. [vercel.com](https://vercel.com) → **Add New → Project** → import this repo.
+2. Set **Root Directory** to `web` — the repo root is the Python backend, and
+   Vercel will otherwise fail to find a Next.js app.
+3. Add the two environment variables above (Production scope at minimum).
+4. Deploy. Verify with a query the seeded corpus actually contains, e.g.
+   "constitutional validity of a statute", and confirm results are real
+   judgments rather than the mock fixtures.
