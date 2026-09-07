@@ -239,6 +239,11 @@ export function SearchPage() {
             </div>
           ) : null}
 
+          {/* Names the results region for screen readers and, just as
+              importantly, supplies the h2 between the page h1 and the h3 on
+              each result card -- without it the heading order skips a level,
+              which Lighthouse flags as a real WCAG 1.3.1 failure. */}
+          <h2 className="sr-only">Search results</h2>
           <ResultsList
             results={filteredResults}
             query={debouncedQuery}

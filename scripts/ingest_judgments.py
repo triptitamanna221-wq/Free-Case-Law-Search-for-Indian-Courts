@@ -34,11 +34,12 @@ from typing import TypeVar
 
 import psutil
 from sentence_transformers import SentenceTransformer
+from sqlalchemy import delete, update
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 from tqdm import tqdm
 
-from app.db.models import Chunk
+from app.db.models import Chunk, Judgment
 from app.db.session import SessionLocal
 from app.ingestion.chunking import chunk_text
 from app.ingestion.embedder import BATCH_SIZE, EMBEDDING_MODEL_NAME, embed_texts
@@ -305,6 +306,19 @@ def process_batch(
 
     def _write_batch() -> None:
         ids = upsert_judgments(db, valid_rows)
+
+        # Judgments upsert, but chunks are plain inserts against a
+        # UNIQUE(judgment_id, chunk_index) constraint -- so without this, any
+        # re-run over already-ingested judgments dies on a duplicate key and
+        # the whole batch is skipped. That made the "idempotent, safe to
+        # re-run" property false in exactly the situation it exists for:
+        # resuming a partial load. Replacing rather than skipping is also the
+        # correct semantics when --chunk-size/--chunk-overlap change, since
+        # the old chunk boundaries no longer correspond to anything.
+        judgment_ids = list(ids.values())
+        if judgment_ids:
+            db.execute(delete(Chunk).where(Chunk.judgment_id.in_(judgment_ids)))
+
         chunk_rows = [
             Chunk(
                 judgment_id=ids[(source_dataset, external_id)],
@@ -316,6 +330,19 @@ def process_batch(
             if (source_dataset, external_id) in ids
         ]
         db.add_all(chunk_rows)
+
+        # This CLI computes embeddings up front and writes them with the chunk
+        # rows, bypassing loaders.chunk_pending_judgments/embed_pending_chunks
+        # -- which are the functions that would otherwise advance the status.
+        # Without this the rows stay at the model default "pending" despite
+        # being fully embedded, which both misreports progress and makes
+        # embed_pending_chunks re-process the entire corpus, since it selects
+        # exactly on ingestion_status == "pending".
+        db.execute(
+            update(Judgment)
+            .where(Judgment.id.in_(list(ids.values())))
+            .values(ingestion_status="embedded")
+        )
         db.commit()
 
     db_start = time.perf_counter()
