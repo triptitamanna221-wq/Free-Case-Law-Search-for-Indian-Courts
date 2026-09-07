@@ -4,12 +4,18 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/* Deliberately reuses shadcn's variable names (--primary, --card, --muted...)
+   rather than inventing a parallel set: every component under components/ui
+   already consumes them, so re-theming happens here once instead of in
+   fourteen component files. The additions below (--keyword, --semantic,
+   --gold, --glass-*) are the genuinely new concepts this app needs. */
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-sans);
+  --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
-  --font-heading: var(--font-sans);
+  --font-serif: var(--font-serif);
+  --font-heading: var(--font-geist-sans);
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -18,11 +24,6 @@
   --color-sidebar-primary: var(--sidebar-primary);
   --color-sidebar-foreground: var(--sidebar-foreground);
   --color-sidebar: var(--sidebar);
-  --color-chart-5: var(--chart-5);
-  --color-chart-4: var(--chart-4);
-  --color-chart-3: var(--chart-3);
-  --color-chart-2: var(--chart-2);
-  --color-chart-1: var(--chart-1);
   --color-ring: var(--ring);
   --color-input: var(--input);
   --color-border: var(--border);
@@ -39,6 +40,18 @@
   --color-popover: var(--popover);
   --color-card-foreground: var(--card-foreground);
   --color-card: var(--card);
+
+  /* Retrieval-path colors. These carry meaning, not decoration: gold marks a
+     lexical/BM25 match, blue a semantic/vector one, emerald both. The same
+     three colors are used for badges, score bars and the legend so the mapping
+     is learnable at a glance. */
+  --color-keyword: var(--keyword);
+  --color-keyword-foreground: var(--keyword-foreground);
+  --color-semantic: var(--semantic);
+  --color-semantic-foreground: var(--semantic-foreground);
+  --color-both: var(--both);
+  --color-both-foreground: var(--both-foreground);
+
   --radius-sm: calc(var(--radius) * 0.6);
   --radius-md: calc(var(--radius) * 0.8);
   --radius-lg: var(--radius);
@@ -48,73 +61,97 @@
   --radius-4xl: calc(var(--radius) * 2.6);
 }
 
+/* Light theme. Warm off-white paper rather than pure white -- long legal
+   prose is the main content here, and #fff at full brightness is fatiguing
+   to read for more than a paragraph. */
 :root {
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
+  --background: oklch(0.985 0.004 250);
+  --foreground: oklch(0.21 0.02 255);
   --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
+  --card-foreground: oklch(0.21 0.02 255);
   --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
-  --radius: 0.625rem;
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.205 0 0);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
+  --popover-foreground: oklch(0.21 0.02 255);
+
+  --primary: oklch(0.52 0.13 165);
+  --primary-foreground: oklch(0.99 0.01 165);
+  --secondary: oklch(0.955 0.008 250);
+  --secondary-foreground: oklch(0.28 0.03 255);
+  --muted: oklch(0.955 0.008 250);
+  --muted-foreground: oklch(0.5 0.02 255);
+  --accent: oklch(0.94 0.02 165);
+  --accent-foreground: oklch(0.3 0.06 165);
+  --destructive: oklch(0.58 0.22 27);
+
+  --border: oklch(0.9 0.01 250);
+  --input: oklch(0.9 0.01 250);
+  --ring: oklch(0.52 0.13 165);
+
+  --keyword: oklch(0.62 0.13 75);
+  --keyword-foreground: oklch(0.99 0.01 75);
+  --semantic: oklch(0.54 0.16 250);
+  --semantic-foreground: oklch(0.99 0.01 250);
+  --both: oklch(0.52 0.13 165);
+  --both-foreground: oklch(0.99 0.01 165);
+
+  --glass-bg: oklch(1 0 0 / 72%);
+  --glass-border: oklch(0.21 0.02 255 / 8%);
+  --halo: oklch(0.52 0.13 165 / 12%);
+
+  --radius: 0.75rem;
+  --sidebar: oklch(1 0 0);
+  --sidebar-foreground: oklch(0.21 0.02 255);
+  --sidebar-primary: oklch(0.52 0.13 165);
+  --sidebar-primary-foreground: oklch(0.99 0.01 165);
+  --sidebar-accent: oklch(0.955 0.008 250);
+  --sidebar-accent-foreground: oklch(0.28 0.03 255);
+  --sidebar-border: oklch(0.9 0.01 250);
+  --sidebar-ring: oklch(0.52 0.13 165);
 }
 
+/* Dark theme -- the primary design target. Deep navy-charcoal rather than
+   neutral gray: the slight blue cast keeps the emerald and gold accents from
+   reading as muddy, which they do against a pure-gray ground. */
 .dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
-  --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.556 0 0);
+  --background: oklch(0.17 0.022 258);
+  --foreground: oklch(0.96 0.006 250);
+  --card: oklch(0.215 0.024 258);
+  --card-foreground: oklch(0.96 0.006 250);
+  --popover: oklch(0.225 0.026 258);
+  --popover-foreground: oklch(0.96 0.006 250);
+
+  --primary: oklch(0.75 0.16 165);
+  --primary-foreground: oklch(0.18 0.03 165);
+  --secondary: oklch(0.27 0.026 258);
+  --secondary-foreground: oklch(0.96 0.006 250);
+  --muted: oklch(0.26 0.024 258);
+  --muted-foreground: oklch(0.72 0.018 255);
+  --accent: oklch(0.3 0.045 165);
+  --accent-foreground: oklch(0.92 0.06 165);
+  --destructive: oklch(0.7 0.19 22);
+
+  --border: oklch(1 0 0 / 11%);
+  --input: oklch(1 0 0 / 14%);
+  --ring: oklch(0.75 0.16 165);
+
+  --keyword: oklch(0.81 0.14 82);
+  --keyword-foreground: oklch(0.2 0.04 82);
+  --semantic: oklch(0.72 0.15 248);
+  --semantic-foreground: oklch(0.18 0.04 248);
+  --both: oklch(0.75 0.16 165);
+  --both-foreground: oklch(0.18 0.03 165);
+
+  --glass-bg: oklch(0.23 0.026 258 / 62%);
+  --glass-border: oklch(1 0 0 / 10%);
+  --halo: oklch(0.75 0.16 165 / 15%);
+
+  --sidebar: oklch(0.2 0.024 258);
+  --sidebar-foreground: oklch(0.96 0.006 250);
+  --sidebar-primary: oklch(0.75 0.16 165);
+  --sidebar-primary-foreground: oklch(0.18 0.03 165);
+  --sidebar-accent: oklch(0.27 0.026 258);
+  --sidebar-accent-foreground: oklch(0.96 0.006 250);
+  --sidebar-border: oklch(1 0 0 / 11%);
+  --sidebar-ring: oklch(0.75 0.16 165);
 }
 
 @layer base {
@@ -126,5 +163,91 @@
   }
   html {
     @apply font-sans;
+  }
+  /* Long judgment text is set in a serif face; UI chrome stays sans. */
+  .prose-legal {
+    font-family: var(--font-serif), ui-serif, Georgia, serif;
+    font-size: 0.975rem;
+    line-height: 1.75;
+  }
+}
+
+@layer utilities {
+  /* Frosted panel. Falls back to an opaque surface where backdrop-filter
+     isn't supported, so text never lands on a transparent background. */
+  .glass {
+    background-color: var(--card);
+    border: 1px solid var(--glass-border);
+  }
+  @supports (backdrop-filter: blur(1px)) {
+    .glass {
+      background-color: var(--glass-bg);
+      backdrop-filter: blur(14px) saturate(150%);
+      -webkit-backdrop-filter: blur(14px) saturate(150%);
+    }
+  }
+
+  /* Faint grid behind the hero. Purely decorative, masked so it fades out
+     before it can compete with the search input. */
+  .hero-grid {
+    background-image:
+      linear-gradient(to right, var(--glass-border) 1px, transparent 1px),
+      linear-gradient(to bottom, var(--glass-border) 1px, transparent 1px);
+    background-size: 56px 56px;
+    mask-image: radial-gradient(ellipse 70% 60% at 50% 0%, #000 35%, transparent 100%);
+    -webkit-mask-image: radial-gradient(ellipse 70% 60% at 50% 0%, #000 35%, transparent 100%);
+  }
+
+  .hero-halo {
+    background: radial-gradient(ellipse 55% 45% at 50% 0%, var(--halo), transparent 70%);
+  }
+
+  .animate-fade-up {
+    animation: fade-up 0.4s cubic-bezier(0.16, 1, 0.3, 1) backwards;
+  }
+
+  .shimmer {
+    background-image: linear-gradient(
+      90deg,
+      transparent 0%,
+      var(--glass-border) 50%,
+      transparent 100%
+    );
+    background-size: 200% 100%;
+    animation: shimmer 1.6s ease-in-out infinite;
+  }
+}
+
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes shimmer {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}
+
+/* Anyone who has asked their OS to reduce motion gets no transforms or
+   looping animations -- WCAG 2.3.3, and these are all decorative. */
+@media (prefers-reduced-motion: reduce) {
+  .animate-fade-up,
+  .shimmer {
+    animation: none;
+  }
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
   }
 }

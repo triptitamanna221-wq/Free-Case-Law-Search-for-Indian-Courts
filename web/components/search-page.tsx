@@ -3,10 +3,14 @@
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import { SlidersHorizontal } from "lucide-react";
+
 import { JudgmentPanel } from "@/components/judgment-panel";
 import { MetadataPanel, type DateRange } from "@/components/metadata-panel";
 import { ResultsList } from "@/components/results-list";
 import { SearchBox } from "@/components/search-box";
+import { Button } from "@/components/ui/button";
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { ApiError, getJudgment, searchJudgments } from "@/lib/api";
 import { useDebouncedValue } from "@/lib/use-debounce";
 import { buildSearchParams, parseSearchState, validateQuery } from "@/lib/search-params";
@@ -37,6 +41,7 @@ export function SearchPage() {
   const [selectedCourts, setSelectedCourts] = useState<Set<string>>(new Set());
   const [dateRange, setDateRange] = useState<DateRange>(EMPTY_DATE_RANGE);
 
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const [panelOpen, setPanelOpen] = useState(false);
   const [selectedJudgmentId, setSelectedJudgmentId] = useState<number | null>(null);
   const [judgment, setJudgment] = useState<JudgmentDetail | null>(null);
@@ -182,8 +187,23 @@ export function SearchPage() {
     });
   }, [outcome, selectedCourts, dateRange]);
 
+  const activeFilterCount = selectedCourts.size + (dateRange.from ? 1 : 0) + (dateRange.to ? 1 : 0);
+
+  const metadataPanel = (
+    <MetadataPanel
+      total={outcome?.total ?? 0}
+      latencyMs={outcome?.latencyMs ?? null}
+      breakdown={outcome?.breakdown ?? { keywordOnly: 0, semanticOnly: 0, hybrid: 0 }}
+      availableCourts={availableCourts}
+      selectedCourts={selectedCourts}
+      onToggleCourt={toggleCourt}
+      dateRange={dateRange}
+      onDateRangeChange={setDateRange}
+    />
+  );
+
   return (
-    <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6">
+    <div className="mx-auto max-w-6xl px-4 pb-16 sm:px-6">
       <SearchBox
         query={query}
         mode={mode}
@@ -196,8 +216,29 @@ export function SearchPage() {
         onSubmit={handleSubmit}
       />
 
-      <div className="mt-8 grid grid-cols-1 gap-8 lg:grid-cols-5">
+      <div className="mt-10 grid grid-cols-1 gap-6 lg:grid-cols-5 lg:gap-8">
         <div className="lg:col-span-3">
+          {/* On narrow screens the stats/filters panel would push results far
+              below the fold, so it moves into a bottom sheet behind this
+              trigger. The same component instance renders in both places. */}
+          {hasSearched ? (
+            <div className="mb-4 flex items-center justify-between gap-3 lg:hidden">
+              <p className="text-sm text-muted-foreground">
+                {filteredResults.length.toLocaleString()}{" "}
+                {filteredResults.length === 1 ? "result" : "results"}
+              </p>
+              <Button variant="outline" size="sm" onClick={() => setFiltersOpen(true)}>
+                <SlidersHorizontal className="h-4 w-4" aria-hidden />
+                Filters
+                {activeFilterCount > 0 ? (
+                  <span className="ml-0.5 rounded-full bg-primary px-1.5 text-[11px] leading-5 text-primary-foreground tabular-nums">
+                    {activeFilterCount}
+                  </span>
+                ) : null}
+              </Button>
+            </div>
+          ) : null}
+
           <ResultsList
             results={filteredResults}
             query={debouncedQuery}
@@ -212,19 +253,20 @@ export function SearchPage() {
             onLoadMore={handleLoadMore}
           />
         </div>
-        <div className="lg:col-span-2">
-          <MetadataPanel
-            total={outcome?.total ?? 0}
-            latencyMs={outcome?.latencyMs ?? null}
-            breakdown={outcome?.breakdown ?? { keywordOnly: 0, semanticOnly: 0, hybrid: 0 }}
-            availableCourts={availableCourts}
-            selectedCourts={selectedCourts}
-            onToggleCourt={toggleCourt}
-            dateRange={dateRange}
-            onDateRangeChange={setDateRange}
-          />
-        </div>
+
+        <aside className="hidden lg:col-span-2 lg:block">
+          <div className="sticky top-20">{metadataPanel}</div>
+        </aside>
       </div>
+
+      <Sheet open={filtersOpen} onOpenChange={setFiltersOpen}>
+        <SheetContent side="bottom" className="max-h-[85vh] overflow-y-auto lg:hidden">
+          <SheetHeader className="pb-2">
+            <SheetTitle>Search details &amp; filters</SheetTitle>
+          </SheetHeader>
+          <div className="px-4 pb-6">{metadataPanel}</div>
+        </SheetContent>
+      </Sheet>
 
       <JudgmentPanel
         open={panelOpen}

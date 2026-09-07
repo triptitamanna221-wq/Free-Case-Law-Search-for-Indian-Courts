@@ -38,16 +38,69 @@ web/
     api/search/route.ts, api/judgments/[id]/route.ts   # backend proxies
   components/
     search-page.tsx        # orchestration: URL state, fetch, filters, panel
-    search-box.tsx, search-mode-toggle.tsx
-    results-list.tsx, result-card.tsx
-    metadata-panel.tsx      # total/latency/breakdown + court+date filters
-    judgment-panel.tsx      # slide-out full-text detail (shadcn Sheet)
+    search-box.tsx          # hero input + combobox suggestions
+    search-suggestions.tsx  # recent (localStorage) + curated examples
+    search-mode-toggle.tsx
+    results-list.tsx        # skeletons, empty states, result stagger
+    result-card.tsx         # badges, match path, relevance bar
+    metadata-panel.tsx      # retrieval-path breakdown + court/date filters
+    judgment-panel.tsx      # slide-out detail, collapsible sections
     header.tsx, footer.tsx, theme-toggle.tsx, theme-provider.tsx
     ui/                     # shadcn/ui components
   lib/
     api.ts                  # fetch wrapper, timeout/error handling, mock-mode switch
+    parse-judgment.ts       # splits raw_text on its own headings
+    use-recent-searches.ts  # localStorage-backed, via useSyncExternalStore
     types.ts, mock-data.ts, format.ts, search-params.ts, use-debounce.ts
 ```
+
+## Design
+
+Dark-first. The palette lives in `app/globals.css` under Tailwind v4's
+`@theme` — there is **no `tailwind.config.ts`** in v4, and the theme
+deliberately reuses shadcn's existing variable names (`--primary`, `--card`,
+`--muted`…) so all fourteen components under `ui/` re-skin from one place
+rather than needing per-component edits.
+
+**Colour carries meaning, not decoration.** Three colours map to the three
+retrieval outcomes and are used identically on the mode toggle, each result
+card's badge and rail, and the breakdown bar:
+
+| | Path |
+|---|---|
+| emerald | matched by both BM25 and vector search |
+| gold | lexical/BM25 match only |
+| blue | semantic/vector match only |
+
+Some deliberate departures from a generic "premium UI" treatment:
+
+- **No animation library.** Framer Motion was considered and skipped: the
+  stagger, collapse and hover effects here are all achievable in CSS
+  (`grid-template-rows: 0fr→1fr` animates a collapse to natural height, which
+  `height: auto` cannot), and ~50KB of JS is a poor trade on a page whose
+  Lighthouse performance is already constrained by a free-tier backend.
+  Measured 79 with the CSS approach, against 47 for the earlier build.
+- **The relevance bar is relative, not a confidence score.** RRF produces
+  small unitless values (~0.016–0.03) that mean nothing in isolation, so the
+  bar is scaled against the top result in the current set and the tooltip says
+  so. Calling it "confidence" would imply a calibrated probability RRF doesn't
+  produce.
+- **Suggestions are labelled "Try these", not "Trending".** There's no
+  analytics pipeline behind this app; presenting a hardcoded list as trending
+  would be inventing usage data. Recent searches *are* real, stored per-browser
+  in `localStorage`.
+- **Judgment sections come from the document, not a classifier.** The API
+  returns one `raw_text` blob, so `lib/parse-judgment.ts` splits on headings
+  the corpus genuinely contains (`PETITIONER:`, `BENCH:`, `CITATION:`,
+  `ACT:`…) and falls back to rendering the text whole when a judgment has
+  none. It does not infer a Facts/Issue/Holding structure that nothing in the
+  data supports.
+
+Accessibility: the suggestions dropdown implements the combobox pattern
+(`aria-expanded`/`aria-controls`/`aria-activedescendant`, arrow-key traversal
+with wrap, Escape to dismiss); collapsed panel sections are `hidden`, so they
+leave the tab order; and `prefers-reduced-motion` disables every transform and
+looping animation.
 
 ## API contract
 
@@ -97,8 +150,9 @@ doesn't compute itself:
 ## Testing
 
 ```bash
-npm run test         # 29 unit tests: query validation, URL param round-tripping,
-                      # breakdown derivation, formatting/highlighting helpers
+npm run test         # 39 unit tests: query validation, URL param round-tripping,
+                      # breakdown derivation, formatting/highlighting helpers,
+                      # judgment heading parsing
 npx eslint .
 npm run build         # also does the real strict-TypeScript check (see below)
 ```
@@ -122,16 +176,20 @@ widths with no horizontal overflow.
 
 Real audit against a local `next start` production build (this repo's own
 sandbox — a shared/virtualized environment, not representative hardware):
-**Accessibility 100/100**. **Performance 47/100** with Lighthouse's default
-mobile CPU throttling — re-running with throttling disabled drops Total
-Blocking Time from 1930ms to 0ms and performance to 65/100, which pins the gap
-on this environment's actual CPU being slow under Lighthouse's throttling
-multiplier, not on JS execution cost in the app itself. Largest Contentful
-Paint remains slow (~5s) even untuned, most likely from this being a cold,
-single-process `next start` with no CDN/edge caching in front of it, which
-changes materially on a real deployment. **Re-run Lighthouse against the
-actual deployed URL** once live — these sandbox numbers aren't a substitute
-for that.
+
+| Category | Score |
+|---|---|
+| Accessibility | **100** — zero failing audits |
+| Best practices | 96 |
+| Performance | **79** (was 47 before the redesign) |
+
+Dark-mode contrast was checked separately, since Lighthouse audits whichever
+theme it renders and dark is the primary target here: sampled text/background
+pairs measure 17.0:1 (hero), 15.6:1 (result title and badges) and 7.0:1
+(snippet body), all clearing WCAG AA.
+
+**Re-run Lighthouse against the deployed Vercel URL** for numbers that reflect
+CDN and edge caching — these local ones aren't a substitute for that.
 
 ## Deployment
 
