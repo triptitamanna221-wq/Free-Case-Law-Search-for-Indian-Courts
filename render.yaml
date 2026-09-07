@@ -1,7 +1,10 @@
-databases:
-  - name: case-law-db
-    plan: free
-    postgresMajorVersion: "15"
+# No `databases:` block on purpose. Postgres lives on Neon's free tier, not
+# Render's: Render's free database is deleted 30 days after creation on a
+# fixed clock (not idle-based, so nothing you can do keeps it alive), which
+# is a poor foundation for a link someone opens weeks after it's shared.
+# Neon's free tier doesn't expire and resumes from scale-to-zero on its own.
+# DATABASE_URL is therefore set by hand in the Render dashboard -- see the
+# envVars note below.
 
 services:
   - name: case-law-search-api
@@ -45,9 +48,14 @@ services:
     # the moment worker count ever goes back up.
     envVars:
       - key: DATABASE_URL
-        fromDatabase:
-          name: case-law-db
-          property: connectionString
+        # sync: false means "managed in the dashboard, don't touch it". This
+        # matters: an earlier version wired this `fromDatabase` to a Render
+        # Postgres, and leaving that in place would let any blueprint re-sync
+        # silently point production back at the expiring database this setup
+        # deliberately moved off. Set it to the Neon connection string
+        # (app/config.py normalizes the postgres:// scheme and preserves the
+        # ?sslmode=require Neon requires).
+        sync: false
       - key: EMBEDDING_MODEL
         value: all-MiniLM-L6-v2
       - key: CORS_ORIGINS
