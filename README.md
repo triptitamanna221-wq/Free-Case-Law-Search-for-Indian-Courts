@@ -14,16 +14,26 @@ Elasticsearch/OpenSearch use for hybrid search — so a query gets both an exact
 citation lookup and a "these mean the same thing" match, whichever the search
 actually needs.
 
-**Live demo:** <https://case-law-search-api.onrender.com/docs> — seeded with a
-100-judgment sample (Render's free Postgres caps at 1GB; the full corpus needs
-a paid plan). First request after an idle period takes ~2 minutes to wake the
-free-tier container; everything after that is fast. Try:
+**Live demo:** <https://free-case-law-search-for-indian-cou-tau.vercel.app>
+(API: <https://case-law-search-api.onrender.com/docs>)
+
+Try the query the keyword half can't answer — *"a company run into the ground
+by its own directors"* — and note the result matches on the semantic path with
+no shared vocabulary at all:
 
 ```bash
 curl -X POST https://case-law-search-api.onrender.com/search \
   -H "Content-Type: application/json" \
   -d '{"query": "a company run into the ground by its own directors", "search_mode": "semantic"}'
 ```
+
+Two caveats worth stating plainly, since they're visible to anyone who opens
+the link: it's seeded with a **100-judgment sample**, not the full 41.8K corpus
+(the embeddings alone are ~1.3GB against a 1GB free-tier database), and the
+**first request after ~15 minutes idle takes up to 2 minutes** while Render
+wakes the free container. Everything after that is fast.
+
+Frontend on Vercel, API on Render, Postgres on Neon — all free tiers, no card.
 
 ## What it does
 
@@ -288,11 +298,15 @@ sample only makes sense on a paid Postgres plan sized for it.
 
 ### 5. Environment variables
 
-`DATABASE_URL` and `EMBEDDING_MODEL` are wired automatically by
-`render.yaml`. Set `CORS_ORIGINS` by hand in the Render dashboard once the
-frontend has a real URL (Environment tab, e.g.
-`CORS_ORIGINS=https://your-app.vercel.app`) — left unset in the Blueprint
-since no committed value should assume a specific deployment.
+`EMBEDDING_MODEL` is set by `render.yaml`. `DATABASE_URL` is **not** — it's
+marked `sync: false` and set by hand in the Render dashboard to the Neon
+connection string, deliberately, so that a blueprint re-sync can't silently
+repoint production at a different database.
+
+`CORS_ORIGINS` can stay unset for the `web/` frontend. The browser never calls
+this API directly — it calls the Next.js app's own same-origin `/api/*` routes,
+which proxy server-side (see [`web/README.md`](web/README.md)). Set it only if
+something else needs to reach the API from a browser.
 
 ### 6. Post-seed validation
 
@@ -328,8 +342,9 @@ cost typically in the tens of seconds).
 - [ ] Full corpus *loaded into* Postgres — blocked on storage, not code: the
       embeddings alone are ~1.3GB against Render free Postgres's 1GB cap, so
       this needs a paid database plan
-- [ ] `web/` deployed alongside the API (set `CORS_ORIGINS` on the service
-      once it has a URL)
+- [x] `web/` deployed to Vercel and wired to the live API — verified in a real
+      browser against the deployed URL (results render, detail panel opens, no
+      mock fallback, zero console errors or failed requests)
 - [ ] Later: auth (schema already has a `users` table for it)
 
 ## License
