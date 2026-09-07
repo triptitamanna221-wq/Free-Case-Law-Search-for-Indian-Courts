@@ -28,8 +28,8 @@ curl -X POST https://case-law-search-api.onrender.com/search \
 ```
 
 Two caveats worth stating plainly, since they're visible to anyone who opens
-the link: it's seeded with a **100-judgment sample**, not the full 41.8K corpus
-(the embeddings alone are ~1.3GB against a 1GB free-tier database), and the
+the link: it's seeded with an **800-judgment sample**, not the full 41.8K corpus
+(Neon's free tier caps at 0.5GB and 800 judgments already use 167MB), and the
 **first request after ~15 minutes idle takes up to 2 minutes** while Render
 wakes the free container. Everything after that is fast.
 
@@ -48,18 +48,19 @@ Frontend on Vercel, API on Render, Postgres on Neon — all free tiers, no card.
 
 | Metric | Value |
 |---|---|
-| Judgments processed | **41,839** — the full corpus, chunked + embedded end-to-end (`data/ingestion_metrics.json`) |
-| Chunks embedded | **883,787** (427.4M tokens total) |
-| Embedding latency (p50 / p95, ms/chunk) | **9.1 / 14.4** — real, from the full 41,839-judgment run (`data/ingestion_metrics.json`) |
-| DB insert latency | **~2.0s per judgment** (judgment row + its ~25 chunk rows, each carrying a 384-dim vector), writing from a laptop to Render's Postgres in Oregon over the public internet. A single-batch measurement from the seed run (`data/seed_metrics_render.json`), not a distribution — network round-trip dominates it, so it says more about the link than the schema |
-| Search latency, deployed (Render free) | **~30ms hybrid, ~15ms semantic, ~4ms keyword** — measured against the live service with the 100-judgment corpus actually seeded |
+| Corpus processed | **41,839 judgments / 883,787 chunks** (427.4M tokens) — the full dataset, chunked + embedded end-to-end (`data/ingestion_metrics.json`). This run was `--dry-run`: embeddings computed and measured, not written to a database |
+| Corpus **live** | **800 judgments / 16,287 chunks**, all embedded, in the deployed Neon database. Not the full corpus — Neon's free tier caps at 0.5GB and 800 judgments already occupy 167MB, so the whole thing needs a paid plan, not more code |
+| Embedding latency (p50 / p95, ms/chunk) | **9.4 / 13.3** (n=20 batches, `data/seed_metrics_neon.json`) |
+| DB insert latency (p50 / p95, per judgment) | **1118ms / 1389ms** (n=20) — a judgment row plus ~20 chunk rows each carrying a 384-dim vector. Measured writing from a laptop in India to `us-west-2`, so this is dominated by round-trip distance and says more about the link than the schema |
+| Citations extracted | **490 rows across 190 judgments** (AIR 461 / SCR 26 / SCC 3), of which **8 resolve to another judgment in the corpus**. The low resolution rate is expected, not a defect: with 800 of 41,839 judgments loaded, a cited case is rarely also in the sample |
+| Search latency, deployed | **~30ms hybrid, ~15ms semantic, ~4ms keyword** — measured against the live service |
+| Test coverage | **64%** across the DB-free suites (`uv run pytest tests/unit tests/models --cov`, 46 tests). The uncovered remainder is the API/schema layer, exercised by `tests/integration` against real Postgres in CI |
 | Cold start, deployed (Render free) | **~2 min** for the first request after an idle spin-down: Render sleeps free containers after 15 minutes, and the container doesn't accept traffic until `lifespan` has loaded the onnx session. Warm requests are unaffected |
 | Serving memory peak | **~290MB** (onnxruntime path) vs **351MB** (torch), against a 512MB container — see the onnx bullet under [Why these choices](#why-these-choices) |
-| Test coverage | _TBD, `uv run pytest --cov`_ |
-| Uptime | _TBD once deployed_ |
 
-(Deliberately left unfilled rather than guessed — updated as each is actually
-measured, not estimated.)
+Every figure above is from an actual run against the real system. Nothing is
+estimated or extrapolated; where something couldn't be measured it says so
+rather than carrying a plausible-looking number.
 
 ## Architecture
 
@@ -117,15 +118,27 @@ flowchart LR
   turned out to require HuggingFace auth) — short version: no free bulk API,
   ToS-questionable at 50K-document scale, and a bare scraper loop isn't
   itself something worth shipping.
-- **Render for both the app and Postgres.** One dashboard, one Blueprint
-  (`render.yaml`), no cross-provider networking to debug. The real tradeoff:
-  Render's free Postgres expires **30 days after creation** — a fixed clock,
-  not activity-based, so a keep-alive query wouldn't prevent it — with a
-  14-day grace period to upgrade before it's permanently deleted. A genuine
-  risk for a demo link opened weeks after an application goes out. See
-  [Deployment](#deployment) for the plan: re-run the Blueprint and reseed
-  (a few minutes of work, not a rebuild) shortly before the 30-day mark, or
-  upgrade the database to a paid plan once this is the one you're keeping.
+- **Render for the app, Neon for Postgres — not Render for both.** The
+  original setup used Render's own free Postgres and had to be migrated off
+  it: that database is deleted **30 days after creation**, on a fixed clock
+  rather than an activity one, so no keep-alive query prevents it. For a link
+  an interviewer opens weeks after an application goes out, a database with an
+  expiry date is the wrong foundation. Neon's free tier doesn't expire and
+  resumes from scale-to-zero by itself. The cost is one more dashboard and a
+  `DATABASE_URL` that is set by hand rather than wired by the Blueprint —
+  deliberately `sync: false` in `render.yaml`, so a blueprint re-sync can't
+  silently repoint production back at the expiring database.
+- **Both regions pinned to US-West.** Render defaults to Oregon; the first
+  Neon project was created in `us-east-2`, which put a cross-country hop in
+  the path of every query — a hybrid search makes several round trips, and
+  deployed latency rose from ~30ms to ~218ms. Re-creating the database in
+  `us-west-2` was a five-minute fix for a 7x regression, and is the kind of
+  thing that is invisible until measured.
+- **Fly.io was evaluated twice and rejected both times.** Its widely-cited
+  "3 VMs + 3GB Postgres free tier" was withdrawn for new accounts in 2024;
+  what remains is a 2-hour/7-day trial, then a mandatory card and ~$2–5/mo.
+  For a project whose premise is being free, that's a worse trade than the
+  cold starts documented above.
 
 ## Getting started
 
@@ -184,9 +197,12 @@ connection is an OAuth flow; there's no headless equivalent).
 1. Push this repo to GitHub (already done if you're reading this from GitHub).
 2. In the [Render dashboard](https://dashboard.render.com), **New +** →
    **Blueprint**, connect the GitHub repo. Render reads `render.yaml` and
-   proposes one Web Service (`case-law-search-api`) + one Postgres database
-   (`case-law-db`), both free tier. Confirm.
-3. Render provisions the database first, then builds the Docker image from
+   proposes one Web Service (`case-law-search-api`). It declares **no**
+   database: Postgres lives on Neon (see [Why these choices](#why-these-choices)),
+   so create a free project at [neon.com](https://neon.com) — pick a
+   **US-West** region to sit beside Render's Oregon default — and paste its
+   connection string into `DATABASE_URL` in the service's Environment tab.
+3. Render builds the Docker image from
    `docker/Dockerfile`, then starts
    `gunicorn -w 1 --timeout 120 -k uvicorn.workers.UvicornWorker app.main:app --bind 0.0.0.0:8000`
    (single worker, generous timeout — see the comment in `render.yaml` for
@@ -228,15 +244,15 @@ from exactly one place, one time, by hand.
 restriction, and reuses `app/config.py`'s URL handling):**
 
 ```bash
-# find the External Database URL on the case-law-db page in the Render
-# dashboard -- looks like postgres://user:pass@host.render.com/db
-export DATABASE_URL="<paste External Database URL>"
+# the Neon connection string, from the project dashboard -- looks like
+# postgresql://user:pass@ep-xxx.us-west-2.aws.neon.tech/neondb?sslmode=require
+export DATABASE_URL="<paste Neon connection string>"
 cd ~/Free-Case-Law-Search-for-Indian-Courts
 uv run alembic upgrade head
 ```
 
 This creates all tables and runs `CREATE EXTENSION IF NOT EXISTS vector`
-(part of migration `0001`) against the real Render database.
+(part of migration `0001`) against the real Neon database.
 `app/config.py` normalizes the plain `postgres://`/`postgresql://` URL
 Render hands back to the `postgresql+psycopg://` form SQLAlchemy needs — no
 manual edit required.
@@ -278,23 +294,30 @@ staged locally:
 ```bash
 export DATABASE_URL="<paste External Database URL>"
 uv run python scripts/ingest_judgments.py --source data/staging --limit 100 --batch-size 32 \
-  --metrics-path data/seed_metrics_render.json
+  --metrics-path data/seed_metrics_neon.json
 ```
 
 Pass `--metrics-path`. Without it the run writes to `data/ingestion_metrics.json`
 and overwrites the full-corpus figures recorded there (41,839 judgments /
-883,787 chunks) with this 100-judgment sample — they're separate results and
-both worth keeping.
+883,787 chunks) with this sample — they're separate results and both worth
+keeping.
 
-**Keep `--limit 100`** — don't drop it to seed the full corpus. Render's
-free Postgres has a **fixed 1GB storage cap**; the full 41,839-judgment
-corpus produces 883,787 chunks, and the embeddings alone
-(883,787 × 384 floats × 4 bytes ≈ 1.3GB) already exceed that on their own,
-before raw text, indexes, or the HNSW index's own overhead. A full-corpus
-run against this database would fail partway through on disk-full, after
-burning real time getting there. 100 judgments (~2,000 chunks, well under
-the cap) is enough to prove the deployed pipeline end-to-end; a bigger
-sample only makes sense on a paid Postgres plan sized for it.
+**Keep the `--limit`** — don't drop it to seed the full corpus. Neon's free
+tier has a **hard 0.5GB cap**, and measured against the real database a
+judgment costs ~209KB once its chunks, embeddings, tsvectors and the HNSW
+index are counted. 800 judgments occupy 167MB; the ceiling is roughly 2,400.
+The full 41,839-judgment corpus produces 883,787 chunks whose embeddings
+alone (883,787 × 384 floats × 4 bytes ≈ 1.3GB) exceed the cap several times
+over before any text is stored, so a full-corpus run fails partway through on
+disk-full after burning hours getting there. That's a plan limit, not a code
+limit — the same command loads the whole corpus against a database sized for
+it.
+
+Then build the citation graph, which needs the corpus already loaded:
+
+```bash
+uv run python scripts/build_citations.py
+```
 
 ### 5. Environment variables
 
@@ -335,13 +358,15 @@ cost typically in the tens of seconds).
 - [x] CI: lint → test → build
 - [x] Production ingestion CLI with real metrics (`scripts/ingest_judgments.py`, `docs/data_pipeline.md`)
 - [x] Search UI (`web/`, Next.js + shadcn/ui) — search, filters, judgment detail panel, dark mode, mock demo mode
-- [x] Backend deployed to Render with a live URL, migrations applied, 100
+- [x] Backend deployed to Render with a live URL, migrations applied, 800
       judgments seeded, `/search` and `/judgments/{id}` verified against it
+- [x] Citation extraction populating the `citations` table (490 rows, 190
+      judgments, 8 resolved within the corpus)
 - [x] Full ~41.8K-judgment corpus chunked + embedded end-to-end (`--dry-run`:
       embed-only, measured, not written to a database)
 - [ ] Full corpus *loaded into* Postgres — blocked on storage, not code: the
-      embeddings alone are ~1.3GB against Render free Postgres's 1GB cap, so
-      this needs a paid database plan
+      embeddings alone are ~1.3GB against Neon free's 0.5GB cap, so this needs
+      a paid database plan rather than further work here
 - [x] `web/` deployed to Vercel and wired to the live API — verified in a real
       browser against the deployed URL (results render, detail panel opens, no
       mock fallback, zero console errors or failed requests)
